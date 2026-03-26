@@ -1,0 +1,12 @@
+# Built binary
+terraform-provider-bella
+terraform-provider-bella.exe
+
+# Local dev config — machine-specific absolute path, not shareable
+.terraformrc
+
+# Terraform working directories
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/terraform.tfvars

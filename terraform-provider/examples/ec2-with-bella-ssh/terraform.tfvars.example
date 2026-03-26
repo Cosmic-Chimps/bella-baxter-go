@@ -1,0 +1,17 @@
+# Bella Baxter
+bella_url     = "https://baxter.example.com"
+bella_api_key = "bax-YOUR_KEY_ID-YOUR_SIGNING_SECRET"   # or: export TF_VAR_bella_api_key=...
+
+# AWS
+aws_region    = "eu-west-1"
+instance_type = "t3.micro"
+
+# Ubuntu 24.04 LTS AMIs per region (update if needed):
+#   us-east-1      : ami-0c7217cdde317cfec
+#   us-west-2      : ami-0d081196e3df05f4d
+#   eu-west-1      : ami-0905a3c97561e0b69
+#   ap-southeast-1 : ami-078c1149d8ad719a7
+ami_id = "ami-0c7217cdde317cfec"
+
+# SSH users the Bella certificate will be valid for (comma-separated)
+ssh_allowed_users = "ubuntu"

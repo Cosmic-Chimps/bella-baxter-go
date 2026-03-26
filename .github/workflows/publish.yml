@@ -1,0 +1,94 @@
+name: Publish Go SDK (pkg.go.dev)
+
+# Go has no central registry — pkg.go.dev auto-indexes any public GitHub repo
+# when a semver tag is pushed. This workflow generates the Kiota client,
+# verifies the VERSION file, and creates a GitHub Release.
+# Triggered by release-sdk.yml creating a tag on this repo.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  SDK_FOLDER: .
+
+jobs:
+  publish:
+    name: Publish bella-baxter-go
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install kiota
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.x'
+      - run: dotnet tool install --global Microsoft.OpenApi.Kiota --version 1.30.0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing bella-baxter-go $VERSION"
+
+      - name: Set production API URL
+        run: |
+          BELLA_BAXTER_API_URL="${{ vars.BELLA_BAXTER_API_URL || 'https://api.bella-baxter.io' }}"
+          if [ "$BELLA_BAXTER_API_URL" != "https://api.bella-baxter.io" ]; then
+            grep -rl 'https://api.bella-baxter.io' . --include='*.go' \
+              | xargs sed -i "s|https://api.bella-baxter.io|${BELLA_BAXTER_API_URL}|g"
+          fi
+
+      - name: Generate Kiota Go client
+        run: |
+          kiota generate \
+            --language Go \
+            --class-name BellaClient \
+            --namespace-name github.com/cosmic-chimps/bella-baxter-go/generated \
+            --openapi openapi.json \
+            --output generated \
+            --exclude-backward-compatible \
+            --clean-output \
+            --log-level Warning
+
+      - name: Verify VERSION file matches tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          FILE_VERSION=$(cat VERSION 2>/dev/null || echo "")
+          if [ "$FILE_VERSION" != "$VERSION" ]; then
+            echo "::error::VERSION file has '$FILE_VERSION' but tag is '$VERSION' — run release-sdk.yml first"
+            exit 1
+          fi
+          echo "✓ VERSION file $FILE_VERSION matches tag $VERSION"
+
+      - name: Build
+        run: go build ./...
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Go SDK ${{ github.ref_name }}"
+          generate_release_notes: true
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: publish
+    if: always()
+    steps:
+      - uses: slackapi/slack-github-action@v3.0.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: webhook-trigger
+          payload: |
+            text: "*SDK Go publish ${{ github.ref_name }}*: ${{ needs.publish.result }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

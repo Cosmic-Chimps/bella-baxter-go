@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────
+# dokploy.tfvars  —  copy this to terraform.tfvars and fill in
+# ─────────────────────────────────────────────────────────────────
+
+aws_region          = "us-east-1"
+project_name        = "dokploy"
+instance_type       = "t3.medium"
+root_volume_size_gb = 30
+
+# ⚠️  Restrict this to your own IP for security: ["1.2.3.4/32"]
+allowed_ssh_cidr = ["0.0.0.0/0"]
+
+# Dokploy admin credentials
+dokploy_admin_email    = "admin@example.com"
+dokploy_admin_password = "ChangeMe123!"
+
+# GitHub token — required for private repos, leave empty for public repos
+github_token = ""
+
+# ─────────────────────────────────────────────────────────────────
+# Docker Compose apps to register & deploy via Dokploy
+# Add one block per repo.
+# ─────────────────────────────────────────────────────────────────
+docker_compose_apps = [
+  {
+    name         = "my-app"
+    repo_url     = "https://github.com/your-org/your-app"
+    branch       = "main"
+    compose_file = "docker-compose.yml"
+    description  = "My first Docker Compose app"
+  },
+  # {
+  #   name         = "another-app"
+  #   repo_url     = "https://github.com/your-org/another-app"
+  #   branch       = "main"
+  #   compose_file = "docker-compose.prod.yml"
+  #   description  = "Another app"
+  # },
+]

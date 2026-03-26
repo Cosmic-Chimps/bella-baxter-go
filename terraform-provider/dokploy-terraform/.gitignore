@@ -1,0 +1,22 @@
+# Terraform state & secrets
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfstate.d/
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Variable files with secrets
+terraform.tfvars
+*.auto.tfvars
+
+# Generated SSH key
+dokploy.pem
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,93 @@
+name: Publish Terraform Provider (GitHub Release)
+
+# Builds cross-platform binaries via GoReleaser, GPG-signs the checksum file,
+# and creates a GitHub Release. Triggered by release-sdk.yml creating a tag.
+#
+# Provider source: cosmic-chimps/bella-baxter
+# Terraform usage:
+#   terraform {
+#     required_providers {
+#       bella-baxter = { source = "cosmic-chimps/bella-baxter" }
+#     }
+#   }
+#
+# Required secrets (repo or org level):
+#   BELLA_BAXTER_GPG_PRIVATE_KEY  — armored private key: gpg --armor --export-secret-keys <fingerprint>
+#   BELLA_BAXTER_GPG_FINGERPRINT  — key fingerprint (40-char hex)
+#   BELLA_BAXTER_GPG_PASSPHRASE   — passphrase (set to empty string if key has no passphrase)
+# Upload the matching public key at: registry.terraform.io → org → GPG Keys
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    name: Release terraform-provider-bella-baxter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing terraform-provider-bella-baxter $VERSION"
+
+      - name: Verify VERSION file matches tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          FILE_VERSION=$(cat VERSION 2>/dev/null || echo "")
+          if [ "$FILE_VERSION" != "$VERSION" ]; then
+            echo "::error::VERSION file has '$FILE_VERSION' but tag is '$VERSION' — run release-sdk.yml first"
+            exit 1
+          fi
+          echo "✓ VERSION file $FILE_VERSION matches tag $VERSION"
+
+      - name: Verify replace directive removed
+        run: |
+          if grep -q 'replace github.com/cosmic-chimps/bella-baxter-go' go.mod; then
+            echo "::error::go.mod still has replace directive — release-sdk.yml should have removed it"
+            exit 1
+          fi
+          echo "✓ No replace directive in go.mod"
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.BELLA_BAXTER_GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "${{ secrets.BELLA_BAXTER_GPG_PASSPHRASE }}" | gpg --batch --yes \
+            --pinentry-mode loopback --passphrase-fd 0 \
+            --list-secret-keys "${{ secrets.BELLA_BAXTER_GPG_FINGERPRINT }}"
+          echo "✓ GPG key ${{ secrets.BELLA_BAXTER_GPG_FINGERPRINT }} imported"
+
+      - name: Build and release with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ secrets.BELLA_BAXTER_GPG_FINGERPRINT }}
+          GPG_PASSPHRASE: ${{ secrets.BELLA_BAXTER_GPG_PASSPHRASE }}
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: publish
+    if: always()
+    steps:
+      - uses: slackapi/slack-github-action@v3.0.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: webhook-trigger
+          payload: |
+            text: "*Terraform Provider publish ${{ github.ref_name }}*: ${{ needs.publish.result }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
