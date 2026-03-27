@@ -46,6 +46,23 @@ jobs:
               | xargs sed -i "s|https://api.bella-baxter.io|${BELLA_BAXTER_API_URL}|g"
           fi
 
+      - name: Update go.sum for bella-baxter-go-kiota and commit
+        run: |
+          git config user.email "bot@bella-baxter.io"
+          git config user.name "Bella Baxter Bot"
+          GONOSUMDB=github.com/cosmic-chimps/* go mod tidy
+          if git diff --quiet go.sum go.mod; then
+            echo "go.sum unchanged"
+          else
+            git add go.sum go.mod
+            git commit -m "chore: update go.sum for ${{ github.ref_name }}"
+            git push origin HEAD:main
+            # Move tag to this commit so go get fetches the correct go.sum
+            git tag -f ${{ github.ref_name }}
+            git push --force origin ${{ github.ref_name }}
+            echo "✓ go.sum updated and tag moved to new commit"
+          fi
+
       - name: Build
         run: go build ./...
 
