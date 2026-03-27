@@ -6,7 +6,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/cosmic-chimps/terraform-provider-bella/internal/provider"
+	"github.com/cosmic-chimps/terraform-provider-bella-baxter/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 

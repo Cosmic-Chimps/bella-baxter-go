@@ -39,7 +39,7 @@ kiotamultipart "github.com/microsoft/kiota-serialization-multipart-go"
 kiotatext "github.com/microsoft/kiota-serialization-text-go"
 kiotahttp "github.com/microsoft/kiota-http-go"
 
-"github.com/cosmic-chimps/bella-baxter-go/generated"
+"github.com/cosmic-chimps/bella-baxter-go-kiota/generated"
 )
 
 // Options configures the BaxterClient.

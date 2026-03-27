@@ -80,7 +80,6 @@ jobs:
           GPG_FINGERPRINT: ${{ secrets.BELLA_BAXTER_GPG_FINGERPRINT }}
           GPG_PASSPHRASE: ${{ secrets.BELLA_BAXTER_GPG_PASSPHRASE }}
           GONOSUMDB: github.com/cosmic-chimps/*
-          GOPROXY: direct
 
   notify:
     runs-on: ubuntu-latest

@@ -9,13 +9,12 @@ project_name: terraform-provider-bella-baxter
 
 before:
   hooks:
-    - sh -c "GONOSUMDB=github.com/cosmic-chimps/* GOPROXY=direct go mod tidy"
+    - sh -c "GONOSUMDB=github.com/cosmic-chimps/* go mod tidy"
 
 builds:
   - env:
       - CGO_ENABLED=0
       - GONOSUMDB=github.com/cosmic-chimps/*
-      - GOPROXY=direct
     mod_timestamp: '{{ .CommitTimestamp }}'
     flags:
       - -trimpath
