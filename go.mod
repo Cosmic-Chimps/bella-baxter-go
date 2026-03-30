@@ -3,7 +3,7 @@ module github.com/cosmic-chimps/bella-baxter-go
 go 1.25.0
 
 require (
-	github.com/cosmic-chimps/bella-baxter-go-kiota v0.1.1-preview.34
+	github.com/cosmic-chimps/bella-baxter-go-kiota v0.1.1-preview.35
 	github.com/google/uuid v1.6.0
 	github.com/microsoft/kiota-abstractions-go v1.9.4
 	github.com/microsoft/kiota-http-go v1.5.5
