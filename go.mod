@@ -3,10 +3,13 @@ module github.com/cosmic-chimps/bella-baxter-go
 go 1.25.0
 
 require (
-	github.com/cosmic-chimps/bella-baxter-go-kiota v0.1.1-preview.36
 	github.com/google/uuid v1.6.0
 	github.com/microsoft/kiota-abstractions-go v1.9.4
 	github.com/microsoft/kiota-http-go v1.5.5
+	github.com/microsoft/kiota-serialization-form-go v1.1.3
+	github.com/microsoft/kiota-serialization-json-go v1.1.2
+	github.com/microsoft/kiota-serialization-multipart-go v1.1.2
+	github.com/microsoft/kiota-serialization-text-go v1.1.3
 	golang.org/x/crypto v0.49.0
 )
 

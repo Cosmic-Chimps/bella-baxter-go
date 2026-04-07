@@ -20,6 +20,7 @@ package bellabaxter
 
 import (
 "context"
+	"crypto/ecdh"
 	"encoding/json"
 	"errors"
 	"io"
@@ -39,7 +40,7 @@ kiotamultipart "github.com/microsoft/kiota-serialization-multipart-go"
 kiotatext "github.com/microsoft/kiota-serialization-text-go"
 kiotahttp "github.com/microsoft/kiota-http-go"
 
-"github.com/cosmic-chimps/bella-baxter-go-kiota/generated"
+"github.com/cosmic-chimps/bella-baxter-go/generated"
 )
 
 // Options configures the BaxterClient.
@@ -69,6 +70,17 @@ Debug bool
 // for audit logging. Falls back to the BELLA_BAXTER_APP_CLIENT environment variable.
 // Example: "my-web-api", "payment-service", "data-pipeline"
 AppClient string
+
+// PrivateKeyPEM is the PKCS#8 PEM private key for ZKE transport.
+// When set, uses a persistent device key instead of generating an ephemeral one per request.
+// Supply via the BELLA_BAXTER_PRIVATE_KEY environment variable or set directly.
+// Obtain with: bella auth setup  (writes to ~/.bella/device-key.pem)
+PrivateKeyPEM string
+
+// OnWrappedDEK is called when the server returns an X-Bella-Wrapped-Dek header.
+// Arguments: projectSlug, envSlug, wrappedDEK (base64), leaseExpires (nil if not set).
+// Use this to cache the wrapped DEK for future offline use.
+OnWrappedDEK func(projectSlug, envSlug, wrappedDEK string, leaseExpires *time.Time)
 }
 
 // Client is a thread-safe Bella Baxter API client backed by the Kiota generated SDK.
@@ -97,10 +109,25 @@ if timeout == 0 {
 timeout = 10 * time.Second
 }
 
+// ZKE: fall back to env var for persistent device key.
+if opts.PrivateKeyPEM == "" {
+	opts.PrivateKeyPEM = os.Getenv("BELLA_BAXTER_PRIVATE_KEY")
+}
+
+// Parse the persistent key once; nil means ephemeral per-client key (original behaviour).
+var persistentKey *ecdh.PrivateKey
+if opts.PrivateKeyPEM != "" {
+	var err error
+	persistentKey, err = loadPrivateKeyPEM(opts.PrivateKeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("bellabaxter: invalid PrivateKeyPEM: %w", err)
+	}
+}
+
 // Build transport chain: (debug) → HMAC → (optional E2EE) → default
 var transport http.RoundTripper = http.DefaultTransport
 if opts.EnableE2EE {
-e2ee, err := newE2EERoundTripper(transport)
+e2ee, err := newE2EERoundTripper(transport, persistentKey, opts.OnWrappedDEK)
 if err != nil {
 return nil, fmt.Errorf("bellabaxter: E2EE init: %w", err)
 }

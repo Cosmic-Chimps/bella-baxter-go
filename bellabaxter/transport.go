@@ -5,12 +5,15 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
+	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
@@ -89,15 +92,23 @@ func (t *hmacRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 // e2eeRoundTripper adds X-E2E-Public-Key to secrets requests and decrypts responses.
 type e2eeRoundTripper struct {
-	base    http.RoundTripper
-	privKey *ecdh.PrivateKey
-	pubB64  string // base64-encoded SPKI public key, sent as header
+	base         http.RoundTripper
+	privKey      *ecdh.PrivateKey
+	pubB64       string // base64-encoded SPKI public key, sent as header
+	onWrappedDEK func(projectSlug, envSlug, wrappedDEK string, leaseExpires *time.Time) // may be nil
 }
 
-func newE2EERoundTripper(base http.RoundTripper) (*e2eeRoundTripper, error) {
-	priv, err := ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("bellabaxter e2ee: key gen: %w", err)
+// newE2EERoundTripper creates an e2eeRoundTripper.
+// If persistentKey is non-nil it is used as the device key (ZKE mode);
+// otherwise an ephemeral P-256 keypair is generated per-client (original behaviour).
+func newE2EERoundTripper(base http.RoundTripper, persistentKey *ecdh.PrivateKey, onWrappedDEK func(string, string, string, *time.Time)) (*e2eeRoundTripper, error) {
+	priv := persistentKey
+	if priv == nil {
+		var err error
+		priv, err = ecdh.P256().GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("bellabaxter e2ee: key gen: %w", err)
+		}
 	}
 	spki := priv.PublicKey().Bytes() // raw P-256 uncompressed point (65 bytes, used for validation)
 	if len(spki) != 65 {
@@ -108,10 +119,47 @@ func newE2EERoundTripper(base http.RoundTripper) (*e2eeRoundTripper, error) {
 		return nil, err
 	}
 	return &e2eeRoundTripper{
-		base:    base,
-		privKey: priv,
-		pubB64:  base64.StdEncoding.EncodeToString(spkiEncoded),
+		base:         base,
+		privKey:      priv,
+		pubB64:       base64.StdEncoding.EncodeToString(spkiEncoded),
+		onWrappedDEK: onWrappedDEK,
 	}, nil
+}
+
+// loadPrivateKeyPEM parses a PKCS#8 PEM private key and returns it as *ecdh.PrivateKey.
+// Supports both *ecdsa.PrivateKey (most common PEM format) and raw *ecdh.PrivateKey.
+func loadPrivateKeyPEM(pemStr string) (*ecdh.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		return nil, fmt.Errorf("bellabaxter e2ee: failed to decode PEM block")
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("bellabaxter e2ee: parse PKCS8: %w", err)
+	}
+	switch k := key.(type) {
+	case *ecdsa.PrivateKey:
+		return k.ECDH()
+	case *ecdh.PrivateKey:
+		return k, nil
+	default:
+		return nil, fmt.Errorf("bellabaxter e2ee: unsupported key type %T, expected P-256 EC key", key)
+	}
+}
+
+// extractSlugFromPath extracts projectSlug and envSlug from a secrets API path.
+// Expected format: /api/v1/projects/{proj}/environments/{env}/secrets[/...]
+func extractSlugFromPath(path string) (projectSlug, envSlug string) {
+	parts := strings.Split(path, "/")
+	for i, p := range parts {
+		if p == "projects" && i+1 < len(parts) {
+			projectSlug = parts[i+1]
+		}
+		if p == "environments" && i+1 < len(parts) {
+			envSlug = parts[i+1]
+		}
+	}
+	return
 }
 
 // marshalP256SPKI encodes a P-256 public key into SubjectPublicKeyInfo DER bytes.
@@ -166,19 +214,33 @@ func (t *e2eeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		// Not encrypted — pass through as-is
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		resp.ContentLength = int64(len(body))
-		return resp, nil
+	} else {
+		secrets, err := t.decrypt(envelope.ServerPublicKey, envelope.Nonce, envelope.Tag, envelope.Ciphertext)
+		if err != nil {
+			return nil, fmt.Errorf("bellabaxter e2ee: decrypt: %w", err)
+		}
+
+		// Plaintext is the full response JSON from the server (AllEnvironmentSecretsResponse,
+		// flat secrets map, or any other payload). Pass it directly to Kiota for parsing —
+		// this preserves all fields (version, environmentSlug, etc.).
+		resp.Body = io.NopCloser(bytes.NewReader(secrets))
+		resp.ContentLength = int64(len(secrets))
 	}
 
-	secrets, err := t.decrypt(envelope.ServerPublicKey, envelope.Nonce, envelope.Tag, envelope.Ciphertext)
-	if err != nil {
-		return nil, fmt.Errorf("bellabaxter e2ee: decrypt: %w", err)
+	// Call OnWrappedDEK if the server returned a wrapped DEK header (ZKE support).
+	if onWrappedDEK := t.onWrappedDEK; onWrappedDEK != nil {
+		if wrapped := resp.Header.Get("X-Bella-Wrapped-Dek"); wrapped != "" {
+			projectSlug, envSlug := extractSlugFromPath(req.URL.Path)
+			var leaseExpires *time.Time
+			if exp := resp.Header.Get("X-Bella-Lease-Expires"); exp != "" {
+				if expTime, err := time.Parse(time.RFC3339, exp); err == nil {
+					leaseExpires = &expTime
+				}
+			}
+			onWrappedDEK(projectSlug, envSlug, wrapped, leaseExpires)
+		}
 	}
 
-	// Plaintext is the full response JSON from the server (AllEnvironmentSecretsResponse,
-	// flat secrets map, or any other payload). Pass it directly to Kiota for parsing —
-	// this preserves all fields (version, environmentSlug, etc.).
-	resp.Body = io.NopCloser(bytes.NewReader(secrets))
-	resp.ContentLength = int64(len(secrets))
 	return resp, nil
 }
 

@@ -26,9 +26,10 @@ type bellaProvider struct {
 
 // bellaProviderModel mirrors the HCL provider block schema.
 type bellaProviderModel struct {
-	BaxterURL types.String `tfsdk:"baxter_url"`
-	ApiKey    types.String `tfsdk:"api_key"`
-	AppName   types.String `tfsdk:"app_name"`
+	BaxterURL  types.String `tfsdk:"baxter_url"`
+	ApiKey     types.String `tfsdk:"api_key"`
+	AppName    types.String `tfsdk:"app_name"`
+	PrivateKey types.String `tfsdk:"private_key"`
 }
 
 // New returns a provider factory that creates bellaProvider instances.
@@ -60,6 +61,15 @@ func (p *bellaProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 				Optional:            true,
 				MarkdownDescription: "Name of your application, sent as the `X-App-Client` header for audit logging (e.g. `my-infra`, `payment-service`). Can also be set via the `BELLA_BAXTER_APP_CLIENT` environment variable.",
 			},
+			"private_key": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				MarkdownDescription: "PKCS#8 PEM private key for Zero-Knowledge Encryption (ZKE). " +
+					"When set, Terraform uses a persistent device key for transport encryption so that " +
+					"audit logs can identify exactly which runner fetched secrets. " +
+					"Generate with `bella auth setup`. " +
+					"Can also be set via the `BELLA_BAXTER_PRIVATE_KEY` environment variable (recommended for CI).",
+			},
 		},
 	}
 }
@@ -76,6 +86,7 @@ func (p *bellaProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	baxterURL := resolveString(config.BaxterURL, "BELLA_BAXTER_URL")
 	apiKey := resolveString(config.ApiKey, "BELLA_API_KEY")
 	appName := resolveString(config.AppName, "BELLA_BAXTER_APP_CLIENT")
+	privateKey := resolveString(config.PrivateKey, "BELLA_BAXTER_PRIVATE_KEY")
 
 	if baxterURL == "" {
 		resp.Diagnostics.AddError(
@@ -94,9 +105,10 @@ func (p *bellaProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	}
 
 	client, err := bellabaxter.New(bellabaxter.Options{
-		BaxterURL: baxterURL,
-		ApiKey:    apiKey,
-		AppClient: appName,
+		BaxterURL:    baxterURL,
+		ApiKey:       apiKey,
+		AppClient:    appName,
+		PrivateKeyPEM: privateKey,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create Bella Baxter client", err.Error())
