@@ -3,7 +3,7 @@ module github.com/cosmic-chimps/terraform-provider-bella-baxter
 go 1.25.0
 
 require (
-	github.com/cosmic-chimps/bella-baxter-go v0.1.1-preview.39
+	github.com/cosmic-chimps/bella-baxter-go v0.1.1-preview.40
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 )
 
