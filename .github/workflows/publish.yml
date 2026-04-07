@@ -1,8 +1,9 @@
 name: Publish Go SDK (pkg.go.dev)
 
 # Go has no central registry — pkg.go.dev auto-indexes any public GitHub repo
-# when a semver tag is pushed. This workflow verifies the VERSION file and
-# creates a GitHub Release. Kiota generation is handled by bella-baxter-go-kiota.
+# when a semver tag is pushed. This workflow verifies the VERSION file,
+# regenerates the Kiota client from openapi.json (committed in repo),
+# and creates a GitHub Release.
 # Triggered by release-sdk.yml creating a tag on this repo.
 
 on:
@@ -28,6 +29,16 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.x'
+
+      - name: Install Kiota
+        run: dotnet tool install --global Microsoft.OpenApi.Kiota --version 1.30.0
+
+      - name: Generate Go client from OpenAPI spec
+        run: kiota update -o generated
+
       - name: Verify VERSION file matches tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -46,7 +57,7 @@ jobs:
               | xargs sed -i "s|https://api.bella-baxter.io|${BELLA_BAXTER_API_URL}|g"
           fi
 
-      - name: Update go.sum for bella-baxter-go-kiota and commit
+      - name: Update go.sum and commit
         run: |
           git config user.email "bot@bella-baxter.io"
           git config user.name "Bella Baxter Bot"
