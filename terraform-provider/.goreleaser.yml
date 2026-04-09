@@ -9,12 +9,16 @@ project_name: terraform-provider-bella-baxter
 
 before:
   hooks:
-    - sh -c "GONOSUMDB=github.com/cosmic-chimps/* go mod tidy"
+    # GONOPROXY: fetch cosmic-chimps packages directly from GitHub, bypassing
+    # proxy.golang.org cache. Needed because bella-baxter-go force-moves its
+    # release tag after committing generated/ — the proxy may serve stale content.
+    - sh -c "GONOSUMDB=github.com/cosmic-chimps/* GONOPROXY=github.com/cosmic-chimps/* go mod tidy"
 
 builds:
   - env:
       - CGO_ENABLED=0
       - GONOSUMDB=github.com/cosmic-chimps/*
+      - GONOPROXY=github.com/cosmic-chimps/*
     mod_timestamp: '{{ .CommitTimestamp }}'
     flags:
       - -trimpath
