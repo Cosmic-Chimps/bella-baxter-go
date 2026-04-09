@@ -39,6 +39,22 @@ jobs:
       - name: Generate Go client from OpenAPI spec
         run: kiota update -o generated
 
+      - name: Commit generated files (required for Go module proxy to serve generated/ package)
+        run: |
+          git config user.email "bot@bella-baxter.io"
+          git config user.name "Bella Baxter Bot"
+          git add -f generated/
+          if git diff --cached --quiet; then
+            echo "generated/ unchanged"
+          else
+            git commit -m "chore: regenerate Go client for ${{ github.ref_name }}"
+            git push origin HEAD:main
+            # Move tag to this commit so go get fetches the generated package
+            git tag -f ${{ github.ref_name }}
+            git push --force origin ${{ github.ref_name }}
+            echo "✓ generated/ committed and tag moved to new commit"
+          fi
+
       - name: Verify VERSION file matches tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -59,8 +75,6 @@ jobs:
 
       - name: Update go.sum and commit
         run: |
-          git config user.email "bot@bella-baxter.io"
-          git config user.name "Bella Baxter Bot"
           GONOSUMDB=github.com/cosmic-chimps/* go mod tidy
           if git diff --quiet go.sum go.mod; then
             echo "go.sum unchanged"
