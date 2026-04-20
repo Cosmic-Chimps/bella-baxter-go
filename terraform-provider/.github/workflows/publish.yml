@@ -62,21 +62,29 @@ jobs:
           fi
           echo "✓ No replace directive in go.mod"
 
-      - name: Wait for bella-baxter-go to be available on Go module proxy
+      # release-sdk.yml already waited for the bella-baxter-go GitHub Release before
+      # creating our tag, so this check should pass on the first attempt.
+      # We check the GitHub Release (not proxy.golang.org) because:
+      # 1. bella-baxter-go may be private (proxy can't index private repos)
+      # 2. Even for public repos, proxy indexing can take minutes
+      # 3. GONOPROXY below makes GoReleaser fetch directly from GitHub, bypassing the proxy
+      - name: Verify bella-baxter-go GitHub Release exists
+        env:
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          echo "Waiting for github.com/cosmic-chimps/bella-baxter-go v${VERSION} on proxy.golang.org..."
-          for i in $(seq 1 30); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              "https://proxy.golang.org/github.com/cosmic-chimps/bella-baxter-go/@v/v${VERSION}.info")
-            if [ "$STATUS" = "200" ]; then
-              echo "✓ bella-baxter-go v${VERSION} available on Go proxy (attempt $i)"
+          echo "Verifying bella-baxter-go v${VERSION} GitHub Release exists..."
+          for i in $(seq 1 15); do
+            STATUS=$(gh api repos/Cosmic-Chimps/bella-baxter-go/releases/tags/v${VERSION} \
+              --jq '.tag_name' 2>/dev/null || echo "")
+            if [ -n "$STATUS" ]; then
+              echo "✓ bella-baxter-go v${VERSION} GitHub Release confirmed (attempt $i)"
               exit 0
             fi
-            echo "Attempt $i/30: not yet available (HTTP $STATUS), waiting 20s..."
+            echo "Attempt $i/15: not yet found — waiting 20s..."
             sleep 20
           done
-          echo "::error::bella-baxter-go v${VERSION} not available on Go proxy after 10 minutes"
+          echo "::error::bella-baxter-go v${VERSION} GitHub Release not found after 5 minutes"
           exit 1
 
       - name: Import GPG key
@@ -97,6 +105,7 @@ jobs:
           GPG_FINGERPRINT: ${{ secrets.BELLA_BAXTER_GPG_FINGERPRINT }}
           GPG_PASSPHRASE: ${{ secrets.BELLA_BAXTER_GPG_PASSPHRASE }}
           GONOSUMDB: github.com/cosmic-chimps/*
+          GONOPROXY: github.com/cosmic-chimps/*
 
   notify:
     runs-on: ubuntu-latest
