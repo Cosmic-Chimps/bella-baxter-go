@@ -39,20 +39,20 @@ jobs:
       - name: Generate Go client from OpenAPI spec
         run: kiota update -o generated
 
-      - name: Commit generated files (required for Go module proxy to serve generated/ package)
+      - name: Commit generated files if changed (safety net — normally a no-op)
         run: |
           git config user.email "bot@bella-baxter.io"
           git config user.name "Bella Baxter Bot"
           git add -f generated/
           if git diff --cached --quiet; then
-            echo "generated/ unchanged"
+            echo "generated/ unchanged — release-sdk.yml already pre-committed it before tagging"
           else
-            git commit -m "chore: regenerate Go client for ${{ github.ref_name }}"
+            # This should rarely (never) happen since release-sdk.yml pre-generates.
+            # If it does happen, commit and push to main ONLY (do NOT move the tag —
+            # force-pushing a tag breaks the Go module proxy cache immutability guarantee).
+            git commit -m "chore: regenerate Go client for ${{ github.ref_name }} [safety-net]"
             git push origin HEAD:main
-            # Move tag to this commit so go get fetches the generated package
-            git tag -f ${{ github.ref_name }}
-            git push --force origin ${{ github.ref_name }}
-            echo "✓ generated/ committed and tag moved to new commit"
+            echo "⚠️ generated/ was unexpectedly changed — committed to main (tag NOT moved)"
           fi
 
       - name: Verify VERSION file matches tag
@@ -73,19 +73,18 @@ jobs:
               | xargs sed -i "s|https://api.bella-baxter.io|${BELLA_BAXTER_API_URL}|g"
           fi
 
-      - name: Update go.sum and commit
+      - name: Update go.sum and commit (safety net — tag is NOT moved)
         run: |
           GONOSUMDB=github.com/cosmic-chimps/* go mod tidy
           if git diff --quiet go.sum go.mod; then
             echo "go.sum unchanged"
           else
             git add go.sum go.mod
-            git commit -m "chore: update go.sum for ${{ github.ref_name }}"
+            git commit -m "chore: update go.sum for ${{ github.ref_name }} [safety-net]"
             git push origin HEAD:main
-            # Move tag to this commit so go get fetches the correct go.sum
-            git tag -f ${{ github.ref_name }}
-            git push --force origin ${{ github.ref_name }}
-            echo "✓ go.sum updated and tag moved to new commit"
+            # Do NOT move the tag — the Go module proxy caches are immutable.
+            # go.sum is not part of what go get downloads; only source files matter.
+            echo "⚠️ go.sum updated on main (tag NOT moved — proxy caches are immutable)"
           fi
 
       - name: Build
