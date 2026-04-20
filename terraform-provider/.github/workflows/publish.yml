@@ -70,7 +70,7 @@ jobs:
       # 3. GONOPROXY below makes GoReleaser fetch directly from GitHub, bypassing the proxy
       - name: Verify bella-baxter-go GitHub Release exists
         env:
-          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           echo "Verifying bella-baxter-go v${VERSION} GitHub Release exists..."
