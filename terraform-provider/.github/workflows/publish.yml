@@ -62,6 +62,23 @@ jobs:
           fi
           echo "✓ No replace directive in go.mod"
 
+      - name: Wait for bella-baxter-go to be available on Go module proxy
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Waiting for github.com/cosmic-chimps/bella-baxter-go v${VERSION} on proxy.golang.org..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://proxy.golang.org/github.com/cosmic-chimps/bella-baxter-go/@v/v${VERSION}.info")
+            if [ "$STATUS" = "200" ]; then
+              echo "✓ bella-baxter-go v${VERSION} available on Go proxy (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/30: not yet available (HTTP $STATUS), waiting 20s..."
+            sleep 20
+          done
+          echo "::error::bella-baxter-go v${VERSION} not available on Go proxy after 10 minutes"
+          exit 1
+
       - name: Import GPG key
         run: |
           echo "${{ secrets.BELLA_BAXTER_GPG_PRIVATE_KEY }}" | gpg --batch --import
