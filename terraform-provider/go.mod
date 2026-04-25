@@ -3,7 +3,7 @@ module github.com/cosmic-chimps/terraform-provider-bella-baxter
 go 1.25.0
 
 require (
-	github.com/cosmic-chimps/bella-baxter-go v0.1.1-preview.54
+	github.com/cosmic-chimps/bella-baxter-go v0.1.1-preview.55
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 )
 
@@ -48,4 +48,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/cosmic-chimps/bella-baxter-go => ../
