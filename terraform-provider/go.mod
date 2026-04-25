@@ -48,3 +48,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
+replace github.com/cosmic-chimps/bella-baxter-go => ../

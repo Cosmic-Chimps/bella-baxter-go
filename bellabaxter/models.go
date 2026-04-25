@@ -79,3 +79,65 @@ type SshSignedCertResponse struct {
 	SerialNumber string `json:"serialNumber"`
 	Instructions string `json:"instructions"`
 }
+
+// ── PKI models ─────────────────────────────────────────────────────────────────
+
+// PkiCaResponse is returned by GetPkiCa.
+type PkiCaResponse struct {
+	Certificate      string  `json:"certificate"`
+	CaChain          string  `json:"caChain"`
+	Instructions     string  `json:"instructions"`
+	AcmeDirectoryUrl *string `json:"acmeDirectoryUrl,omitempty"`
+}
+
+// PkiRoleResponse describes a single PKI role.
+type PkiRoleResponse struct {
+	Name            string `json:"name"`
+	AllowedDomains  string `json:"allowedDomains"`
+	AllowSubdomains bool   `json:"allowSubdomains"`
+	AllowLocalhost  bool   `json:"allowLocalhost"`
+	AllowAnyName    bool   `json:"allowAnyName"`
+	DefaultTtl      string `json:"defaultTtl"`
+	MaxTtl          string `json:"maxTtl"`
+	KeyType         string `json:"keyType"`
+}
+
+// PkiRolesResponse is returned by ListPkiRoles.
+type PkiRolesResponse struct {
+	Roles []PkiRoleResponse `json:"roles"`
+}
+
+// PkiCreateRoleRequest is the body for CreatePkiRole.
+type PkiCreateRoleRequest struct {
+	Name            string `json:"name"`
+	AllowedDomains  string `json:"allowedDomains"`
+	AllowSubdomains bool   `json:"allowSubdomains"`
+	AllowLocalhost  bool   `json:"allowLocalhost"`
+	AllowAnyName    bool   `json:"allowAnyName"`
+	DefaultTtl      string `json:"defaultTtl,omitempty"`
+	MaxTtl          string `json:"maxTtl,omitempty"`
+	KeyType         string `json:"keyType,omitempty"`
+	KeyBits         int    `json:"keyBits,omitempty"`
+}
+
+// PkiIssueCertificateRequest is the body for IssuePkiCertificate.
+type PkiIssueCertificateRequest struct {
+	RoleName   string  `json:"roleName"`
+	CommonName string  `json:"commonName"`
+	AltNames   *string `json:"altNames,omitempty"`
+	IpSans     *string `json:"ipSans,omitempty"`
+	Ttl        *string `json:"ttl,omitempty"`
+}
+
+// PkiIssuedCertificateResponse is returned by IssuePkiCertificate.
+type PkiIssuedCertificateResponse struct {
+	Success        bool     `json:"success"`
+	Certificate    string   `json:"certificate"`
+	PrivateKey     string   `json:"privateKey"`
+	PrivateKeyType string   `json:"privateKeyType"`
+	IssuingCa      string   `json:"issuingCa"`
+	CaChain        []string `json:"caChain"`
+	SerialNumber   string   `json:"serialNumber"`
+	Expiration     int64    `json:"expiration"`
+	Instructions   string   `json:"instructions"`
+}

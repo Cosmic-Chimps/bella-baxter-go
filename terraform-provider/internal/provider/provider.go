@@ -140,6 +140,7 @@ func (p *bellaProvider) Resources(_ context.Context) []func() resource.Resource 
 	return []func() resource.Resource{
 		NewSecretResource,
 		NewSshRoleResource,
+		NewPkiRoleResource,
 	}
 }
 
@@ -149,6 +150,8 @@ func (p *bellaProvider) DataSources(_ context.Context) []func() datasource.DataS
 		NewSecretsDataSource,
 		NewSshCaPublicKeyDataSource,
 		NewSshSignedCertDataSource,
+		NewPkiCaDataSource,
+		NewPkiCertificateDataSource,
 	}
 }
 

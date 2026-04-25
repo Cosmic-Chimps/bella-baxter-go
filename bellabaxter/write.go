@@ -179,3 +179,52 @@ func (c *Client) SignSshKey(ctx context.Context, projectSlug, envSlug string, re
 	}
 	return &resp, nil
 }
+
+// ── PKI methods ────────────────────────────────────────────────────────────────
+
+// GetPkiCa returns the PKI CA certificate and ACME directory URL for an environment.
+func (c *Client) GetPkiCa(ctx context.Context, projectSlug, envSlug string) (*PkiCaResponse, error) {
+	path := fmt.Sprintf("/api/v1/projects/%s/environments/%s/pki/ca",
+		url.PathEscape(projectSlug), url.PathEscape(envSlug))
+	var resp PkiCaResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListPkiRoles lists all PKI roles for an environment.
+func (c *Client) ListPkiRoles(ctx context.Context, projectSlug, envSlug string) (*PkiRolesResponse, error) {
+	path := fmt.Sprintf("/api/v1/projects/%s/environments/%s/pki/roles",
+		url.PathEscape(projectSlug), url.PathEscape(envSlug))
+	var resp PkiRolesResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreatePkiRole creates a PKI role for an environment.
+func (c *Client) CreatePkiRole(ctx context.Context, projectSlug, envSlug string, req PkiCreateRoleRequest) error {
+	path := fmt.Sprintf("/api/v1/projects/%s/environments/%s/pki/roles",
+		url.PathEscape(projectSlug), url.PathEscape(envSlug))
+	return c.doWrite(ctx, http.MethodPost, path, req, nil)
+}
+
+// DeletePkiRole deletes a PKI role by name.
+func (c *Client) DeletePkiRole(ctx context.Context, projectSlug, envSlug, roleName string) error {
+	path := fmt.Sprintf("/api/v1/projects/%s/environments/%s/pki/roles/%s",
+		url.PathEscape(projectSlug), url.PathEscape(envSlug), url.PathEscape(roleName))
+	return c.doWrite(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// IssuePkiCertificate issues a TLS certificate from the PKI engine.
+func (c *Client) IssuePkiCertificate(ctx context.Context, projectSlug, envSlug string, req PkiIssueCertificateRequest) (*PkiIssuedCertificateResponse, error) {
+	path := fmt.Sprintf("/api/v1/projects/%s/environments/%s/pki/issue",
+		url.PathEscape(projectSlug), url.PathEscape(envSlug))
+	var resp PkiIssuedCertificateResponse
+	if err := c.doWrite(ctx, http.MethodPost, path, req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
