@@ -10,7 +10,7 @@ require (
 	github.com/microsoft/kiota-serialization-json-go v1.1.2
 	github.com/microsoft/kiota-serialization-multipart-go v1.1.2
 	github.com/microsoft/kiota-serialization-text-go v1.1.3
-	golang.org/x/crypto v0.49.0
+	golang.org/x/crypto v0.52.0
 )
 
 require (
