@@ -63,7 +63,11 @@ EnableE2EE bool
 
 // Debug logs every HTTP request and response to stderr.
 // Can also be enabled by setting the BELLA_DEBUG=1 environment variable.
-// Sensitive headers (X-Bella-Key-Id, X-Bella-Signature) are masked automatically.
+//
+// Sensitive headers (Authorization, X-Bella-Key-Id, X-Bella-Signature, Cookie,
+// Set-Cookie) are masked. Request bodies are never logged and successful response
+// bodies are never logged, because both carry secret VALUES in the clear at this
+// point in the chain; a failed response body is logged, truncated.
 Debug bool
 
 // AppClient is the name of your application, sent as the X-App-Client header

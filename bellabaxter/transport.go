@@ -315,17 +315,39 @@ func isOK(r *http.Response) bool {
 // loggingRoundTripper logs every HTTP request and response to stderr.
 // Enable by setting the BELLA_DEBUG=1 environment variable.
 //
-// Sensitive headers (Authorization, X-Bella-Key-Id, X-Bella-Signature, Cookie)
-// are masked so credentials never appear in logs.
+// Sensitive headers (Authorization, X-Bella-Key-Id, X-Bella-Signature, Cookie,
+// Set-Cookie) are masked, and BODIES ARE NOT LOGGED except for a truncated
+// response body on a non-2xx status.
+//
+// The body rule is not caution, it is the whole point. This transport is the
+// OUTERMOST of the chain (debug -> HMAC -> optional E2EE -> default), so it sees
+// request bodies before encryption and response bodies after decryption.
+// CreateSecret and UpdateSecret put the secret value in the request body in the
+// clear, so logging request bodies wrote secrets to stderr for anyone who had set
+// BELLA_DEBUG=1 — including a `terraform apply` that merely inherited it from its
+// environment. A successful response body is the read path and carries the value
+// for the same reason.
+//
+// A failure body is the one worth keeping: it is the API's problem document, it is
+// what a person turns debug logging on to read, and it does not carry a secret
+// value. It is truncated, matching the .NET CLI's DebugLoggingHandler, which has
+// had this shape all along.
 type loggingRoundTripper struct {
 	base http.RoundTripper
 }
 
+// maxLoggedBody is how much of a failure body reaches the log. Long enough for a
+// problem document, short enough that an unexpected payload cannot scroll away
+// whatever the reader was actually looking for.
+const maxLoggedBody = 500
+
+// Keys are in net/http canonical form, which is what Header maps are keyed by.
 var maskedHeaders = map[string]bool{
-	"Authorization":    true,
-	"X-Bella-Key-Id":   true,
+	"Authorization":     true,
+	"X-Bella-Key-Id":    true,
 	"X-Bella-Signature": true,
-	"Cookie":           true,
+	"Cookie":            true,
+	"Set-Cookie":        true,
 }
 
 func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -339,16 +361,7 @@ func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 	}
 
-	var reqBody []byte
-	if req.Body != nil {
-		var err error
-		reqBody, err = io.ReadAll(req.Body)
-		req.Body.Close()
-		if err == nil && len(reqBody) > 0 {
-			log.Printf("[BELLA]     body: %s", string(reqBody))
-		}
-		req.Body = io.NopCloser(bytes.NewReader(reqBody))
-	}
+	// The request body is never logged: on a write it IS the secret value.
 
 	// ── Perform ──────────────────────────────────────────────────────────────
 	resp, err := t.base.RoundTrip(req)
@@ -360,18 +373,38 @@ func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	// ── Response ─────────────────────────────────────────────────────────────
 	log.Printf("[BELLA] <-- %s", resp.Status)
 	for k, vs := range resp.Header {
-		log.Printf("[BELLA]     %s: %s", k, strings.Join(vs, ", "))
+		if maskedHeaders[k] {
+			log.Printf("[BELLA]     %s: ***", k)
+		} else {
+			log.Printf("[BELLA]     %s: %s", k, strings.Join(vs, ", "))
+		}
 	}
 
+	// A successful body is a secret on the read path, so it is never logged. The
+	// body is still read and replaced either way: draining it here and handing back
+	// a fresh reader is what keeps the caller's decoding identical with and without
+	// debug logging on.
 	respBody, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("bellabaxter debug: read response body: %w", err)
 	}
-	if len(respBody) > 0 {
-		log.Printf("[BELLA]     body: %s", string(respBody))
+	if !isOK(resp) && len(respBody) > 0 {
+		log.Printf("[BELLA]     body: %s", truncate(string(respBody), maxLoggedBody))
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	resp.ContentLength = int64(len(respBody))
 	return resp, nil
+}
+
+// truncate shortens s to at most n bytes, saying so when it did.
+//
+// Byte-wise on purpose: a body can be any encoding, and a rune-safe slice buys
+// tidier output at the cost of a rule that is harder to state. It marks the cut so
+// a reader never mistakes a truncated document for a malformed one.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + fmt.Sprintf("… (%d bytes total, truncated)", len(s))
 }
