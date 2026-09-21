@@ -103,11 +103,25 @@ func main() {
 // loadSecrets fetches all secrets from Bella Baxter.
 // Called once in main() — zero per-request overhead.
 func loadSecrets() (map[string]string, error) {
-	apiKey    := os.Getenv("BELLA_API_KEY")
+	// #733: BELLA_BAXTER_API_KEY is the canonical name `bella sdk run` injects;
+	// BELLA_API_KEY is the deprecated alias it also sets. Read the canonical one first
+	// so the sample keeps working if the alias is ever dropped.
+	apiKey := os.Getenv("BELLA_BAXTER_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("BELLA_API_KEY")
+	}
 	baxterURL := getEnv("BELLA_BAXTER_URL", "http://localhost:5000")
 
 	if apiKey == "" {
-		log.Println("BELLA_API_KEY not set — skipping secret load")
+		// #733: this used to be a quiet "skipping" line, and that is the defect rather
+		// than the message. `bella sdk run` under an OAuth session injects
+		// BELLA_BAXTER_ACCESS_TOKEN and NO api key, so the sample started, served
+		// fallback values, and looked like it had loaded secrets. A sample whose whole
+		// point is loading secrets must not start without them.
+		return nil, fmt.Errorf(
+			"no Bella credential in the environment: set BELLA_BAXTER_API_KEY, or run this " +
+				"under `bella sdk run -- go run .` with an API key (an OAuth session injects " +
+				"an access token and no api key, which this sample cannot use)")
 		return map[string]string{}, nil
 	}
 

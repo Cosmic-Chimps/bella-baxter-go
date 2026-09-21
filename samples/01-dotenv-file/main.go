@@ -19,8 +19,8 @@ func main() {
 		log.Printf("warning: could not load .env file: %v", err)
 	}
 
-	port   := getEnv("PORT", "3000")
-	dbURL  := getEnv("DATABASE_URL", "(not set)")
+	port := getEnv("PORT", "3000")
+	dbURL := getEnv("DATABASE_URL", "(not set)")
 	apiKey := getEnv("EXTERNAL_API_KEY", "(not set)")
 
 	fmt.Println("=== Bella Baxter: .env file sample (Go) ===")

@@ -1,3 +1,8 @@
 # Kiota-generated client — regenerate with: kiota update -o generated/
 # or run apps/sdk/generate.sh from repo root
 generated/
+
+# #733: compiled sample binaries. Four were tracked (28 MB total, one 13 MB), so every
+# `go build` in a sample produced a diff nobody meant to commit — and a stale binary next
+# to fixed source is worse than no binary, because it still runs.
+samples/*/bellabaxter-sample-*

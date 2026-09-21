@@ -5,14 +5,14 @@
 package secrets
 
 import (
-"encoding/json"
-"fmt"
-"net/url"
-"os"
-"strconv"
-"strings"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
 
-"github.com/google/uuid"
+	"github.com/google/uuid"
 )
 
 type AppConfigShape struct {
@@ -23,11 +23,11 @@ type AppConfigShape struct {
 type AppSecrets struct{}
 
 func mustGetenv(key string) string {
-v := os.Getenv(key)
-if v == "" {
-panic(fmt.Sprintf("Required environment variable '%s' is not set.", key))
-}
-return v
+	v := os.Getenv(key)
+	if v == "" {
+		panic(fmt.Sprintf("Required environment variable '%s' is not set.", key))
+	}
+	return v
 }
 
 // ExternalApiKey returns the third-party API key (String).
@@ -41,27 +41,27 @@ func (s AppSecrets) EnableFeatures() bool { return mustGetenv("ENABLE_FEATURES")
 
 // DatabaseUrl returns the PostgreSQL connection string (Uri).
 func (s AppSecrets) DatabaseUrl() *url.URL {
-raw := mustGetenv("DATABASE_URL")
-u, err := url.Parse(raw)
-if err != nil || u == nil {
-// Demo URLs may have non-numeric ports; extract scheme manually.
-u = &url.URL{}
-if i := strings.Index(raw, "://"); i > 0 {
-u.Scheme = raw[:i]
-}
-}
-return u
+	raw := mustGetenv("DATABASE_URL")
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		// Demo URLs may have non-numeric ports; extract scheme manually.
+		u = &url.URL{}
+		if i := strings.Index(raw, "://"); i > 0 {
+			u.Scheme = raw[:i]
+		}
+	}
+	return u
 }
 
 // AppConfig returns the application configuration parsed from JSON.
 func (s AppSecrets) AppConfig() AppConfigShape {
-var cfg AppConfigShape
-_ = json.Unmarshal([]byte(mustGetenv("APP_CONFIG")), &cfg)
-return cfg
+	var cfg AppConfigShape
+	_ = json.Unmarshal([]byte(mustGetenv("APP_CONFIG")), &cfg)
+	return cfg
 }
 
 // AppId returns the application instance ID (GUID).
 func (s AppSecrets) AppId() uuid.UUID {
-id, _ := uuid.Parse(mustGetenv("APP_ID"))
-return id
+	id, _ := uuid.Parse(mustGetenv("APP_ID"))
+	return id
 }

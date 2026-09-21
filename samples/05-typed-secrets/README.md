@@ -23,7 +23,7 @@ secrets.AppSecrets{}.DatabaseUrl()  (typed, IDE-autocomplete, runtime panic on m
 go mod tidy
 
 # Run with secrets injected by bella
-bella run --api-key bax-... -- go run .
+BELLA_BAXTER_API_KEY=bax-... bella run -- go run .
 ```
 
 ## Why use typed secrets?

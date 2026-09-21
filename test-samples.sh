@@ -131,7 +131,7 @@ section "02-process-inject  (bella run -- go run .)"
 # ─────────────────────────────────────────────────────────────────────────────
 cd "$SAMPLES_DIR/02-process-inject"
 
-OUTPUT=$(bella run --api-key "$BELLA_API_KEY" --app "go-02-process-inject" -- go run . 2>/dev/null)
+OUTPUT=$(BELLA_BAXTER_API_KEY="$BELLA_API_KEY" bella run --app "go-02-process-inject" -- go run . 2>/dev/null)
 
 contains "02: banner printed"          "=== Bella Baxter: process inject sample (Go) ===" "$OUTPUT"
 check    "02: PORT"                    "$EXPECTED_PORT"            "$(extract 'PORT' "$OUTPUT")"
@@ -221,7 +221,7 @@ section "05-typed-secrets  (bella run -- go run .)"
 # ─────────────────────────────────────────────────────────────────────────────
 cd "$SAMPLES_DIR/05-typed-secrets"
 
-OUTPUT=$(bella run --api-key "$BELLA_API_KEY" --app "go-05-typed-secrets" -- go run . 2>/dev/null)
+OUTPUT=$(BELLA_BAXTER_API_KEY="$BELLA_API_KEY" bella run --app "go-05-typed-secrets" -- go run . 2>/dev/null)
 
 contains "05: banner printed"            "=== Bella Baxter: Typed Secrets (Go) ===" "$OUTPUT"
 
