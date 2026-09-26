@@ -40,12 +40,15 @@ provider "bella" {
 > **Note:** The API key already encodes which project and environment it is scoped to.
 > `project_slug` and `environment_slug` are resolved automatically from the key via `GET /api/v1/keys/me` — you never need to specify them explicitly.
 
+> **Which role?** The resources (`bella_secret`, `bella_ssh_role`, `bella_pki_role`) create and delete things, so they need a **Manager** key. A Manager key manages the *content* of the **one environment it is scoped to** — secrets, PKI roles, SSH roles, TOTP keys and rotation policies — and nothing else: it cannot change, delete or copy the environment, manage its members or providers, or mint keys, and another environment of the same project, or the project itself, answers 404. The data sources only read (or sign/issue), so a **Consumer** key for the same environment is enough if you use nothing else.
+
 ### In CI (GitHub Actions with OIDC)
 
 Use the [`bella-baxter-setup-action`](https://github.com/Cosmic-Chimps/bella-baxter-setup-action) and `bella auth oidc` to exchange a GitHub OIDC token for a short-lived `BELLA_API_KEY` — no long-lived secrets needed in GitHub Actions.
 
 ```yaml
-- uses: Cosmic-Chimps/bella-baxter-setup-action@main
+# Pin a release tag (or its commit SHA), never @main: the ref you pin is the code that installs the CLI.
+- uses: Cosmic-Chimps/bella-baxter-setup-action@v0.1.1-preview.113
 
 - name: Authenticate with Bella
   run: bella auth oidc
