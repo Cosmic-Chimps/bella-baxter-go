@@ -61,8 +61,9 @@ func loadConfig() (*Config, error) {
 
 	if apiKey != "" {
 		client, err := bellabaxter.New(bellabaxter.Options{
-			BaxterURL:  baxterURL,
-			ApiKey:     apiKey,
+			BaxterURL: baxterURL,
+			ApiKey:    apiKey,
+			// Only for runs WITHOUT a device key (ephemeral E2EE). A BELLA_BAXTER_PRIVATE_KEY is presented without it (#992).
 			EnableE2EE: true,
 			Timeout:    10 * time.Second,
 		})

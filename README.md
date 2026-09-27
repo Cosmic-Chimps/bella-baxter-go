@@ -69,7 +69,30 @@ func main() {
 | `BaxterURL` | `https://api.bella-baxter.io` | Base URL of the Bella Baxter API |
 | `ApiKey` | — | API key (starts with `bax-`). Obtain from WebApp → Project → API Keys |
 | `Timeout` | `10s` | Per-request HTTP timeout |
-| `EnableE2EE` | `false` | Enable end-to-end encryption for secrets responses |
+| `PrivateKeyPEM` | `BELLA_BAXTER_PRIVATE_KEY` | Device key (PKCS#8 P-256, PEM or base64 DER). When supplied, it is presented and responses are decrypted with it — no other option needed |
+| `EnableE2EE` | `false` | End-to-end encryption **without** a device key (an ephemeral key per client). Not needed when a device key is supplied |
+| `DisableE2EE` | `false` | Explicit opt-out: never present a key, even a supplied one (logs one warning if a key is supplied) |
+
+## Device key (ZKE)
+
+When a device key is supplied — `PrivateKeyPEM`, or the `BELLA_BAXTER_PRIVATE_KEY` variable that
+`bella sdk run` injects — the client presents it as `X-E2E-Public-Key` on every secrets request and
+decrypts the response with it. You do not need `EnableE2EE` for that. Under ZKE enforcement this is
+what lets the app read at all: a request that presents no registered key is refused with a 403.
+
+```go
+client, err := bellabaxter.New(bellabaxter.Options{
+    BaxterURL: os.Getenv("BELLA_BAXTER_URL"),
+    ApiKey:    os.Getenv("BELLA_API_KEY"),
+    // PrivateKeyPEM defaults to BELLA_BAXTER_PRIVATE_KEY
+})
+```
+
+- A key that is set but unreadable makes `New` return an error naming `BELLA_BAXTER_PRIVATE_KEY` (or
+  `Options.PrivateKeyPEM`). It is never replaced by a throwaway key.
+- `DisableE2EE: true` keeps the key off the wire. `New` then logs one warning through the standard `log`
+  package, because under enforcement every read will be refused.
+- Setting both `EnableE2EE` and `DisableE2EE` is an error.
 
 ## Samples
 

@@ -19,6 +19,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -126,26 +127,50 @@ func newE2EERoundTripper(base http.RoundTripper, persistentKey *ecdh.PrivateKey,
 	}, nil
 }
 
-// loadPrivateKeyPEM parses a PKCS#8 PEM private key and returns it as *ecdh.PrivateKey.
-// Supports both *ecdsa.PrivateKey (most common PEM format) and raw *ecdh.PrivateKey.
+// loadPrivateKeyPEM parses a PKCS#8 P-256 private key and returns it as *ecdh.PrivateKey.
+//
+// It accepts the PKCS#8 PEM `bella sdk run` injects and bare base64 PKCS#8 DER: when the value
+// holds no PEM block, the `-----…-----` armour and all whitespace (including CRLF) are stripped
+// and the rest is base64-decoded — the same rule the JS, Java, .NET, Dart and Swift SDKs apply to
+// BELLA_BAXTER_PRIVATE_KEY. Both *ecdsa.PrivateKey and *ecdh.PrivateKey PKCS#8 encodings load.
+//
+// Any other curve is refused: the wire contract is P-256 only, and a P-384 key would otherwise
+// load here and fail later as an opaque server-side error.
 func loadPrivateKeyPEM(pemStr string) (*ecdh.PrivateKey, error) {
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		return nil, fmt.Errorf("bellabaxter e2ee: failed to decode PEM block")
+	var der []byte
+	if block, _ := pem.Decode([]byte(pemStr)); block != nil {
+		der = block.Bytes
+	} else {
+		body := pemArmourOrSpace.ReplaceAllString(pemStr, "")
+		decoded, err := base64.StdEncoding.DecodeString(body)
+		if err != nil {
+			return nil, fmt.Errorf("neither a PEM block nor base64 PKCS#8 DER")
+		}
+		der = decoded
 	}
-	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	key, err := x509.ParsePKCS8PrivateKey(der)
 	if err != nil {
-		return nil, fmt.Errorf("bellabaxter e2ee: parse PKCS8: %w", err)
+		return nil, fmt.Errorf("parse PKCS#8: %w", err)
 	}
+	var priv *ecdh.PrivateKey
 	switch k := key.(type) {
 	case *ecdsa.PrivateKey:
-		return k.ECDH()
+		if priv, err = k.ECDH(); err != nil {
+			return nil, err
+		}
 	case *ecdh.PrivateKey:
-		return k, nil
+		priv = k
 	default:
-		return nil, fmt.Errorf("bellabaxter e2ee: unsupported key type %T, expected P-256 EC key", key)
+		return nil, fmt.Errorf("unsupported key type %T, expected a P-256 EC key", key)
 	}
+	if priv.Curve() != ecdh.P256() {
+		return nil, fmt.Errorf("unsupported curve, expected P-256")
+	}
+	return priv, nil
 }
+
+// pemArmourOrSpace matches `-----BEGIN …-----` / `-----END …-----` lines and whitespace.
+var pemArmourOrSpace = regexp.MustCompile(`-----[A-Z0-9 ]+-----|\s`)
 
 // extractSlugFromPath extracts projectSlug and envSlug from a secrets API path.
 // Expected format: /api/v1/projects/{proj}/environments/{env}/secrets[/...]

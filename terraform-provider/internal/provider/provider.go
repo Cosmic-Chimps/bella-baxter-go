@@ -4,6 +4,7 @@ package provider
 import (
 	"context"
 	"os"
+	"strings"
 
 	bellabaxter "github.com/cosmic-chimps/bella-baxter-go/bellabaxter"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -64,9 +65,11 @@ func (p *bellaProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 			"private_key": schema.StringAttribute{
 				Optional:  true,
 				Sensitive: true,
-				MarkdownDescription: "PKCS#8 PEM private key for Zero-Knowledge Encryption (ZKE). " +
-					"When set, Terraform uses a persistent device key for transport encryption so that " +
-					"audit logs can identify exactly which runner fetched secrets. " +
+				MarkdownDescription: "PKCS#8 PEM P-256 device private key for Zero-Knowledge Encryption (ZKE). " +
+					"When set, the provider presents this key on every secrets read and decrypts the " +
+					"response with it, so audit logs identify exactly which runner fetched secrets. " +
+					"When the tenant enforces ZKE, secrets reads are refused unless this is the public key " +
+					"recorded on the API key in use. A value that is set but unreadable fails provider configuration. " +
 					"Generate with `bella auth setup`. " +
 					"Can also be set via the `BELLA_BAXTER_PRIVATE_KEY` environment variable (recommended for CI).",
 			},
@@ -104,12 +107,7 @@ func (p *bellaProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		return
 	}
 
-	client, err := bellabaxter.New(bellabaxter.Options{
-		BaxterURL:    baxterURL,
-		ApiKey:       apiKey,
-		AppClient:    appName,
-		PrivateKeyPEM: privateKey,
-	})
+	client, err := bellabaxter.New(clientOptions(baxterURL, apiKey, appName, privateKey))
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create Bella Baxter client", err.Error())
 		return
@@ -166,6 +164,22 @@ type providerClient struct {
 	client             *bellabaxter.Client
 	defaultProjectSlug string
 	defaultEnvSlug     string
+}
+
+// clientOptions builds the SDK options from the provider's resolved settings.
+func clientOptions(baxterURL, apiKey, appName, privateKey string) bellabaxter.Options {
+	return bellabaxter.Options{
+		BaxterURL:     baxterURL,
+		ApiKey:        apiKey,
+		AppClient:     appName,
+		PrivateKeyPEM: privateKey,
+		// #992: the SDK this module pins presents the device key ONLY when EnableE2EE is set, so
+		// without this a configured private_key / BELLA_BAXTER_PRIVATE_KEY was parsed and never
+		// sent, and every read was refused under ZKE enforcement. SDK releases carrying #992
+		// present a supplied key on their own; this line then becomes redundant but stays
+		// harmless (EnableE2EE with a key means "use that key").
+		EnableE2EE: strings.TrimSpace(privateKey) != "",
+	}
 }
 
 // resolveString returns the value from a types.String if set, otherwise falls

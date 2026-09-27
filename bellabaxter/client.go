@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 "encoding/hex"
 "fmt"
 "net/http"
@@ -55,11 +56,25 @@ ApiKey string
 // Timeout is the per-request HTTP timeout (default: 10s).
 Timeout time.Duration
 
-// EnableE2EE enables end-to-end encryption for secrets responses.
-// When true, a P-256 keypair is generated and X-E2E-Public-Key is sent with
-// every secrets request so the server encrypts the response payload.
-// Decryption happens automatically and transparently.
+// EnableE2EE turns on end-to-end encryption for secrets responses even when no
+// device key is supplied: an ephemeral P-256 keypair is generated for this client,
+// its public key is sent as X-E2E-Public-Key with every secrets request, and the
+// encrypted response is decrypted transparently.
+//
+// You do NOT need it to use a device key. Supplying one (PrivateKeyPEM or the
+// BELLA_BAXTER_PRIVATE_KEY environment variable) turns E2EE on by itself, with
+// that key — a device key has no other purpose (#992).
 EnableE2EE bool
+
+// DisableE2EE is the explicit opt-out: no X-E2E-Public-Key is sent and responses
+// are not decrypted, even when a device key is supplied. A supplied key is then
+// ignored, and New logs one warning through the standard log package saying so,
+// because under ZKE enforcement every secrets read will be refused.
+//
+// It is a separate field, not a tri-state EnableE2EE, so that the zero value of
+// Options keeps meaning "decide from the key" and existing EnableE2EE: true
+// callers compile and behave unchanged. Setting both is an error.
+DisableE2EE bool
 
 // Debug logs every HTTP request and response to stderr.
 // Can also be enabled by setting the BELLA_DEBUG=1 environment variable.
@@ -75,10 +90,15 @@ Debug bool
 // Example: "my-web-api", "payment-service", "data-pipeline"
 AppClient string
 
-// PrivateKeyPEM is the PKCS#8 PEM private key for ZKE transport.
-// When set, uses a persistent device key instead of generating an ephemeral one per request.
-// Supply via the BELLA_BAXTER_PRIVATE_KEY environment variable or set directly.
-// Obtain with: bella auth setup  (writes to ~/.bella/device-key.pem)
+// PrivateKeyPEM is the PKCS#8 P-256 device private key for ZKE transport, as PEM
+// or as bare base64 PKCS#8 DER. When empty, New reads BELLA_BAXTER_PRIVATE_KEY
+// (which `bella sdk run` injects).
+//
+// A supplied key is PRESENTED: New turns E2EE on with it, sends its public key as
+// X-E2E-Public-Key with every secrets request and decrypts the response with it —
+// no EnableE2EE needed. A key that is present but unreadable makes New return an
+// error naming where it came from; it never falls back to an ephemeral key.
+// Obtain one with: bella auth setup
 PrivateKeyPEM string
 
 // OnWrappedDEK is called when the server returns an X-Bella-Wrapped-Dek header.
@@ -113,29 +133,33 @@ if timeout == 0 {
 timeout = 10 * time.Second
 }
 
-// ZKE: fall back to env var for persistent device key.
-if opts.PrivateKeyPEM == "" {
-	opts.PrivateKeyPEM = os.Getenv("BELLA_BAXTER_PRIVATE_KEY")
-}
-
-// Parse the persistent key once; nil means ephemeral per-client key (original behaviour).
-var persistentKey *ecdh.PrivateKey
-if opts.PrivateKeyPEM != "" {
-	var err error
-	persistentKey, err = loadPrivateKeyPEM(opts.PrivateKeyPEM)
-	if err != nil {
-		return nil, fmt.Errorf("bellabaxter: invalid PrivateKeyPEM: %w", err)
-	}
-}
-
-// Build transport chain: (debug) → HMAC → (optional E2EE) → default
-var transport http.RoundTripper = http.DefaultTransport
-if opts.EnableE2EE {
-e2ee, err := newE2EERoundTripper(transport, persistentKey, opts.OnWrappedDEK)
+// ZKE: resolve the device key (explicit option first, then the environment).
+persistentKey, keySource, err := resolveDeviceKey(opts.PrivateKeyPEM)
 if err != nil {
-return nil, fmt.Errorf("bellabaxter: E2EE init: %w", err)
+	return nil, err
 }
-transport = e2ee
+
+e2eeOn, err := e2eeEnabled(opts, persistentKey != nil)
+if err != nil {
+	return nil, err
+}
+if persistentKey != nil && !e2eeOn {
+	// Once per client, at construction — never per request. Through the standard log
+	// package (stderr unless the application redirected it), never stdout.
+	log.Printf("[BELLA] warning: a device key is supplied via %s but DisableE2EE is set, "+
+		"so the key is NOT presented and secrets responses are not end-to-end encrypted. "+
+		"Under ZKE enforcement every secrets read will be refused (403). "+
+		"Remove DisableE2EE to use the key, or stop supplying it.", keySource)
+}
+
+// Build transport chain: (debug) → HMAC → (E2EE) → default
+var transport http.RoundTripper = http.DefaultTransport
+if e2eeOn {
+	e2ee, err := newE2EERoundTripper(transport, persistentKey, opts.OnWrappedDEK)
+	if err != nil {
+		return nil, fmt.Errorf("bellabaxter: E2EE init: %w", err)
+	}
+	transport = e2ee
 }
 transport = &hmacRoundTripper{
 base:          transport,
@@ -189,6 +213,46 @@ adapter.SetBaseUrl(strings.TrimRight(opts.BaxterURL, "/"))
 return &Client{kiota: generated.NewBellaClient(adapter), baseURL: strings.TrimRight(opts.BaxterURL, "/"), httpClient: httpClient}, nil
 }
 
+// privateKeyEnvVar is where `bella sdk run` injects the device key.
+const privateKeyEnvVar = "BELLA_BAXTER_PRIVATE_KEY"
+
+// resolveDeviceKey returns the device key to present and where it came from.
+//
+// Absent or blank (in the option and the environment) means no device key: nil, no
+// error. Anything else must load as a P-256 PKCS#8 key, or it is an error naming its
+// source — never a silent fallback to an ephemeral key, which would present a key
+// nobody registered and turn every read into a 403 whose cause is invisible from
+// inside the application (#989, #992).
+func resolveDeviceKey(explicit string) (*ecdh.PrivateKey, string, error) {
+	value, source := explicit, "Options.PrivateKeyPEM"
+	if strings.TrimSpace(value) == "" {
+		value, source = os.Getenv(privateKeyEnvVar), privateKeyEnvVar
+	}
+	if strings.TrimSpace(value) == "" {
+		return nil, "", nil
+	}
+	key, err := loadPrivateKeyPEM(value)
+	if err != nil {
+		return nil, "", fmt.Errorf("bellabaxter: %s is set but is not a readable PKCS#8 P-256 private key "+
+			"(PEM or base64 DER expected): %w. Refusing to continue with a throwaway key instead of your "+
+			"device key. Unset it, or re-run: bella auth setup", source, err)
+	}
+	return key, source, nil
+}
+
+// e2eeEnabled decides whether secrets requests present a public key and decrypt the
+// response. A supplied device key turns it on; EnableE2EE turns it on without one
+// (ephemeral key); DisableE2EE is the only way to turn it off.
+func e2eeEnabled(opts Options, haveDeviceKey bool) (bool, error) {
+	if opts.EnableE2EE && opts.DisableE2EE {
+		return false, fmt.Errorf("bellabaxter: EnableE2EE and DisableE2EE are both set; choose one")
+	}
+	if opts.DisableE2EE {
+		return false, nil
+	}
+	return opts.EnableE2EE || haveDeviceKey, nil
+}
+
 // Close releases any resources held by the client.
 func (c *Client) Close() {}
 
@@ -196,8 +260,9 @@ func (c *Client) Close() {}
 
 // GetAllSecrets fetches all secrets for an environment aggregated across all assigned providers.
 //
-// Results are served from Baxter's Redis cache. When EnableE2EE is true,
-// the response is encrypted by the server and decrypted transparently.
+// Results are served from Baxter's Redis cache. When E2EE is on (a device key is
+// supplied, or EnableE2EE is set), the response is encrypted by the server and
+// decrypted transparently.
 func (c *Client) GetAllSecrets(ctx context.Context, projectRef, envSlug string) (*AllEnvironmentSecretsResponse, error) {
 	resp, err := c.kiota.Api().V1().Projects().ById(projectRef).
 		Environments().ByEnvSlug(envSlug).
