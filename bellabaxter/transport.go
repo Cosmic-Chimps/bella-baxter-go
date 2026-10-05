@@ -214,6 +214,8 @@ func (t *e2eeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	if isSecretsReq {
 		clone.Header.Set("X-E2E-Public-Key", t.pubB64)
 	}
+	// #1050 (b): the key was presented, so on a read the server always encrypts, plaintext is refused.
+	mustBeEnvelope := isSecretsReq && requiresEnvelope(req.Method, req.URL.Path)
 
 	resp, err := t.base.RoundTrip(clone)
 	if err != nil || !isSecretsReq || !isOK(resp) {
@@ -236,13 +238,17 @@ func (t *e2eeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		Ciphertext      string `json:"ciphertext"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil || !envelope.Encrypted {
-		// Not encrypted — pass through as-is
+		if mustBeEnvelope {
+			// Not an envelope where one is the only acceptable answer: never hand it to the caller.
+			return nil, newE2EEResponseError(E2EEPlaintextResponse, req.URL.Path, nil)
+		}
+		// A value-less /secrets call (metadata, writes, …) is answered in plain JSON: pass it through.
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		resp.ContentLength = int64(len(body))
 	} else {
 		secrets, err := t.decrypt(envelope.ServerPublicKey, envelope.Nonce, envelope.Tag, envelope.Ciphertext)
 		if err != nil {
-			return nil, fmt.Errorf("bellabaxter e2ee: decrypt: %w", err)
+			return nil, newE2EEResponseError(E2EEDecryptionFailed, req.URL.Path, err)
 		}
 
 		// Plaintext is the full response JSON from the server (AllEnvironmentSecretsResponse,

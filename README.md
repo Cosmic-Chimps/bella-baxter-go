@@ -93,6 +93,10 @@ client, err := bellabaxter.New(bellabaxter.Options{
 - `DisableE2EE: true` keeps the key off the wire. `New` then logs one warning through the standard `log`
   package, because under enforcement every read will be refused.
 - Setting both `EnableE2EE` and `DisableE2EE` is an error.
+- Once a key is presented, a secrets read that does not come back as an envelope decrypting with it is
+  refused with an `*bellabaxter.E2EEResponseError` (match with `errors.As`): `Code` is
+  `e2ee-plaintext-response` for a plaintext answer and `e2ee-decryption-failed` for a tampered envelope or
+  one encrypted to another key. There is no plaintext fallback (#1050).
 
 ## Samples
 
