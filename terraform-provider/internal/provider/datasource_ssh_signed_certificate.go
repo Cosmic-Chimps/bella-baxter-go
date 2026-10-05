@@ -27,16 +27,16 @@ type sshSignedCertDataSource struct {
 type sshSignedCertDataSourceModel struct {
 	// Inputs
 	ProjectSlug     types.String `tfsdk:"project_slug"`
-	EnvironmentSlug  types.String `tfsdk:"environment_slug"`
-	RoleName         types.String `tfsdk:"role_name"`
-	PublicKey        types.String `tfsdk:"public_key"`
-	ValidPrincipals  types.String `tfsdk:"valid_principals"`
-	Ttl              types.String `tfsdk:"ttl"`
+	EnvironmentSlug types.String `tfsdk:"environment_slug"`
+	RoleName        types.String `tfsdk:"role_name"`
+	PublicKey       types.String `tfsdk:"public_key"`
+	ValidPrincipals types.String `tfsdk:"valid_principals"`
+	Ttl             types.String `tfsdk:"ttl"`
 	// Computed
-	ID          types.String `tfsdk:"id"`
-	SignedKey   types.String `tfsdk:"signed_key"`
-	Serial      types.String `tfsdk:"serial"`
-	ExpiresAt   types.String `tfsdk:"expires_at"`
+	ID        types.String `tfsdk:"id"`
+	SignedKey types.String `tfsdk:"signed_key"`
+	Serial    types.String `tfsdk:"serial"`
+	ExpiresAt types.String `tfsdk:"expires_at"`
 }
 
 func (d *sshSignedCertDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {

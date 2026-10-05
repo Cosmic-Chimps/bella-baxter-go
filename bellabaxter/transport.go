@@ -95,7 +95,7 @@ func (t *hmacRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 type e2eeRoundTripper struct {
 	base         http.RoundTripper
 	privKey      *ecdh.PrivateKey
-	pubB64       string // base64-encoded SPKI public key, sent as header
+	pubB64       string                                                                 // base64-encoded SPKI public key, sent as header
 	onWrappedDEK func(projectSlug, envSlug, wrappedDEK string, leaseExpires *time.Time) // may be nil
 }
 

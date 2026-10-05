@@ -2,109 +2,113 @@
 //
 // # Usage
 //
-//client, err := bellabaxter.New(bellabaxter.Options{
-//    BaxterURL: "https://api.bella-baxter.io",
-//    ApiKey:    "bax-7e98d73e4023419aacde52c1d360bbd8-a3f9c8d2e1b4a7f6e8c2d4b6f8e1b4a7",
-//})
-//if err != nil {
-//    log.Fatal(err)
-//}
-//defer client.Close()
+//	client, err := bellabaxter.New(bellabaxter.Options{
+//	   BaxterURL: "https://api.bella-baxter.io",
+//	   ApiKey:    "bax-7e98d73e4023419aacde52c1d360bbd8-a3f9c8d2e1b4a7f6e8c2d4b6f8e1b4a7",
+//	})
 //
-//resp, err := client.GetAllSecrets(ctx, "my-project", "production")
-//if err != nil {
-//    log.Fatal(err)
-//}
-//fmt.Println(resp.Secrets["DATABASE_URL"])
+//	if err != nil {
+//	   log.Fatal(err)
+//	}
+//
+// defer client.Close()
+//
+// resp, err := client.GetAllSecrets(ctx, "my-project", "production")
+//
+//	if err != nil {
+//	   log.Fatal(err)
+//	}
+//
+// fmt.Println(resp.Secrets["DATABASE_URL"])
 package bellabaxter
 
 import (
-"context"
+	"context"
 	"crypto/ecdh"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
-"encoding/hex"
-"fmt"
-"net/http"
-"os"
-"strings"
-"time"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
-kiotaabstractions "github.com/microsoft/kiota-abstractions-go"
+	kiotaabstractions "github.com/microsoft/kiota-abstractions-go"
+	kiotaauth "github.com/microsoft/kiota-abstractions-go/authentication"
 	kiotaser "github.com/microsoft/kiota-abstractions-go/serialization"
-kiotaauth "github.com/microsoft/kiota-abstractions-go/authentication"
-kiotaform "github.com/microsoft/kiota-serialization-form-go"
-kiotajson "github.com/microsoft/kiota-serialization-json-go"
-kiotamultipart "github.com/microsoft/kiota-serialization-multipart-go"
-kiotatext "github.com/microsoft/kiota-serialization-text-go"
-kiotahttp "github.com/microsoft/kiota-http-go"
+	kiotahttp "github.com/microsoft/kiota-http-go"
+	kiotaform "github.com/microsoft/kiota-serialization-form-go"
+	kiotajson "github.com/microsoft/kiota-serialization-json-go"
+	kiotamultipart "github.com/microsoft/kiota-serialization-multipart-go"
+	kiotatext "github.com/microsoft/kiota-serialization-text-go"
 
-"github.com/cosmic-chimps/bella-baxter-go/generated"
+	"github.com/cosmic-chimps/bella-baxter-go/generated"
 )
 
 // Options configures the BaxterClient.
 type Options struct {
-// BaxterURL is the base URL of the Bella Baxter API (e.g. "https://baxter.example.com").
-BaxterURL string
+	// BaxterURL is the base URL of the Bella Baxter API (e.g. "https://baxter.example.com").
+	BaxterURL string
 
-// ApiKey is a Bella Baxter API key (starts with "bax-").
-// Obtain one from the WebApp under Project → API Keys.
-ApiKey string
+	// ApiKey is a Bella Baxter API key (starts with "bax-").
+	// Obtain one from the WebApp under Project → API Keys.
+	ApiKey string
 
-// Timeout is the per-request HTTP timeout (default: 10s).
-Timeout time.Duration
+	// Timeout is the per-request HTTP timeout (default: 10s).
+	Timeout time.Duration
 
-// EnableE2EE turns on end-to-end encryption for secrets responses even when no
-// device key is supplied: an ephemeral P-256 keypair is generated for this client,
-// its public key is sent as X-E2E-Public-Key with every secrets request, and the
-// encrypted response is decrypted transparently.
-//
-// You do NOT need it to use a device key. Supplying one (PrivateKeyPEM or the
-// BELLA_BAXTER_PRIVATE_KEY environment variable) turns E2EE on by itself, with
-// that key — a device key has no other purpose (#992).
-EnableE2EE bool
+	// EnableE2EE turns on end-to-end encryption for secrets responses even when no
+	// device key is supplied: an ephemeral P-256 keypair is generated for this client,
+	// its public key is sent as X-E2E-Public-Key with every secrets request, and the
+	// encrypted response is decrypted transparently.
+	//
+	// You do NOT need it to use a device key. Supplying one (PrivateKeyPEM or the
+	// BELLA_BAXTER_PRIVATE_KEY environment variable) turns E2EE on by itself, with
+	// that key — a device key has no other purpose (#992).
+	EnableE2EE bool
 
-// DisableE2EE is the explicit opt-out: no X-E2E-Public-Key is sent and responses
-// are not decrypted, even when a device key is supplied. A supplied key is then
-// ignored, and New logs one warning through the standard log package saying so,
-// because under ZKE enforcement every secrets read will be refused.
-//
-// It is a separate field, not a tri-state EnableE2EE, so that the zero value of
-// Options keeps meaning "decide from the key" and existing EnableE2EE: true
-// callers compile and behave unchanged. Setting both is an error.
-DisableE2EE bool
+	// DisableE2EE is the explicit opt-out: no X-E2E-Public-Key is sent and responses
+	// are not decrypted, even when a device key is supplied. A supplied key is then
+	// ignored, and New logs one warning through the standard log package saying so,
+	// because under ZKE enforcement every secrets read will be refused.
+	//
+	// It is a separate field, not a tri-state EnableE2EE, so that the zero value of
+	// Options keeps meaning "decide from the key" and existing EnableE2EE: true
+	// callers compile and behave unchanged. Setting both is an error.
+	DisableE2EE bool
 
-// Debug logs every HTTP request and response to stderr.
-// Can also be enabled by setting the BELLA_DEBUG=1 environment variable.
-//
-// Sensitive headers (Authorization, X-Bella-Key-Id, X-Bella-Signature, Cookie,
-// Set-Cookie) are masked. Request bodies are never logged and successful response
-// bodies are never logged, because both carry secret VALUES in the clear at this
-// point in the chain; a failed response body is logged, truncated.
-Debug bool
+	// Debug logs every HTTP request and response to stderr.
+	// Can also be enabled by setting the BELLA_DEBUG=1 environment variable.
+	//
+	// Sensitive headers (Authorization, X-Bella-Key-Id, X-Bella-Signature, Cookie,
+	// Set-Cookie) are masked. Request bodies are never logged and successful response
+	// bodies are never logged, because both carry secret VALUES in the clear at this
+	// point in the chain; a failed response body is logged, truncated.
+	Debug bool
 
-// AppClient is the name of your application, sent as the X-App-Client header
-// for audit logging. Falls back to the BELLA_BAXTER_APP_CLIENT environment variable.
-// Example: "my-web-api", "payment-service", "data-pipeline"
-AppClient string
+	// AppClient is the name of your application, sent as the X-App-Client header
+	// for audit logging. Falls back to the BELLA_BAXTER_APP_CLIENT environment variable.
+	// Example: "my-web-api", "payment-service", "data-pipeline"
+	AppClient string
 
-// PrivateKeyPEM is the PKCS#8 P-256 device private key for ZKE transport, as PEM
-// or as bare base64 PKCS#8 DER. When empty, New reads BELLA_BAXTER_PRIVATE_KEY
-// (which `bella sdk run` injects).
-//
-// A supplied key is PRESENTED: New turns E2EE on with it, sends its public key as
-// X-E2E-Public-Key with every secrets request and decrypts the response with it —
-// no EnableE2EE needed. A key that is present but unreadable makes New return an
-// error naming where it came from; it never falls back to an ephemeral key.
-// Obtain one with: bella auth setup
-PrivateKeyPEM string
+	// PrivateKeyPEM is the PKCS#8 P-256 device private key for ZKE transport, as PEM
+	// or as bare base64 PKCS#8 DER. When empty, New reads BELLA_BAXTER_PRIVATE_KEY
+	// (which `bella sdk run` injects).
+	//
+	// A supplied key is PRESENTED: New turns E2EE on with it, sends its public key as
+	// X-E2E-Public-Key with every secrets request and decrypts the response with it —
+	// no EnableE2EE needed. A key that is present but unreadable makes New return an
+	// error naming where it came from; it never falls back to an ephemeral key.
+	// Obtain one with: bella auth setup
+	PrivateKeyPEM string
 
-// OnWrappedDEK is called when the server returns an X-Bella-Wrapped-Dek header.
-// Arguments: projectSlug, envSlug, wrappedDEK (base64), leaseExpires (nil if not set).
-// Use this to cache the wrapped DEK for future offline use.
-OnWrappedDEK func(projectSlug, envSlug, wrappedDEK string, leaseExpires *time.Time)
+	// OnWrappedDEK is called when the server returns an X-Bella-Wrapped-Dek header.
+	// Arguments: projectSlug, envSlug, wrappedDEK (base64), leaseExpires (nil if not set).
+	// Use this to cache the wrapped DEK for future offline use.
+	OnWrappedDEK func(projectSlug, envSlug, wrappedDEK string, leaseExpires *time.Time)
 }
 
 // Client is a thread-safe Bella Baxter API client backed by the Kiota generated SDK.
@@ -118,99 +122,99 @@ type Client struct {
 
 // New creates a new Client and validates the provided Options.
 func New(opts Options) (*Client, error) {
-if strings.TrimSpace(opts.BaxterURL) == "" {
-	opts.BaxterURL = "https://api.bella-baxter.io"
-}
-if strings.TrimSpace(opts.ApiKey) == "" {
-return nil, fmt.Errorf("bellabaxter: ApiKey must not be empty")
-}
-if !strings.HasPrefix(strings.TrimSpace(opts.ApiKey), "bax-") {
-return nil, fmt.Errorf("bellabaxter: ApiKey must start with 'bax-'")
-}
-
-timeout := opts.Timeout
-if timeout == 0 {
-timeout = 10 * time.Second
-}
-
-// ZKE: resolve the device key (explicit option first, then the environment).
-persistentKey, keySource, err := resolveDeviceKey(opts.PrivateKeyPEM)
-if err != nil {
-	return nil, err
-}
-
-e2eeOn, err := e2eeEnabled(opts, persistentKey != nil)
-if err != nil {
-	return nil, err
-}
-if persistentKey != nil && !e2eeOn {
-	// Once per client, at construction — never per request. Through the standard log
-	// package (stderr unless the application redirected it), never stdout.
-	log.Printf("[BELLA] warning: a device key is supplied via %s but DisableE2EE is set, "+
-		"so the key is NOT presented and secrets responses are not end-to-end encrypted. "+
-		"Under ZKE enforcement every secrets read will be refused (403). "+
-		"Remove DisableE2EE to use the key, or stop supplying it.", keySource)
-}
-
-// Build transport chain: (debug) → HMAC → (E2EE) → default
-var transport http.RoundTripper = http.DefaultTransport
-if e2eeOn {
-	e2ee, err := newE2EERoundTripper(transport, persistentKey, opts.OnWrappedDEK)
-	if err != nil {
-		return nil, fmt.Errorf("bellabaxter: E2EE init: %w", err)
+	if strings.TrimSpace(opts.BaxterURL) == "" {
+		opts.BaxterURL = "https://api.bella-baxter.io"
 	}
-	transport = e2ee
-}
-transport = &hmacRoundTripper{
-base:          transport,
-keyID:         parseKeyID(opts.ApiKey),
-signingSecret: parseSigningSecret(opts.ApiKey),
-appClient:     firstNonEmpty(opts.AppClient, os.Getenv("BELLA_BAXTER_APP_CLIENT")),
-}
-if opts.Debug || os.Getenv("BELLA_DEBUG") == "1" || os.Getenv("BELLA_DEBUG") == "true" {
-transport = &loggingRoundTripper{base: transport}
-}
+	if strings.TrimSpace(opts.ApiKey) == "" {
+		return nil, fmt.Errorf("bellabaxter: ApiKey must not be empty")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(opts.ApiKey), "bax-") {
+		return nil, fmt.Errorf("bellabaxter: ApiKey must start with 'bax-'")
+	}
 
-httpClient := &http.Client{
-Transport: transport,
-Timeout:   timeout,
-}
+	timeout := opts.Timeout
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
 
-// Register Kiota serialization factories (idempotent — safe to call multiple times)
-kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
-return kiotajson.NewJsonSerializationWriterFactory()
-})
-kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
-return kiotatext.NewTextSerializationWriterFactory()
-})
-kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
-return kiotaform.NewFormSerializationWriterFactory()
-})
-kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
-return kiotamultipart.NewMultipartSerializationWriterFactory()
-})
-kiotaabstractions.RegisterDefaultDeserializer(func() kiotaser.ParseNodeFactory {
-return kiotajson.NewJsonParseNodeFactory()
-})
-kiotaabstractions.RegisterDefaultDeserializer(func() kiotaser.ParseNodeFactory {
-return kiotatext.NewTextParseNodeFactory()
-})
-kiotaabstractions.RegisterDefaultDeserializer(func() kiotaser.ParseNodeFactory {
-return kiotaform.NewFormParseNodeFactory()
-})
+	// ZKE: resolve the device key (explicit option first, then the environment).
+	persistentKey, keySource, err := resolveDeviceKey(opts.PrivateKeyPEM)
+	if err != nil {
+		return nil, err
+	}
 
-adapter, err := kiotahttp.NewNetHttpRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
-&kiotaauth.AnonymousAuthenticationProvider{}, // HMAC transport does auth
-nil, // default parse node factory
-nil, // default serialization writer factory
-httpClient,
-)
-if err != nil {
-return nil, fmt.Errorf("bellabaxter: create adapter: %w", err)
-}
-adapter.SetBaseUrl(strings.TrimRight(opts.BaxterURL, "/"))
+	e2eeOn, err := e2eeEnabled(opts, persistentKey != nil)
+	if err != nil {
+		return nil, err
+	}
+	if persistentKey != nil && !e2eeOn {
+		// Once per client, at construction — never per request. Through the standard log
+		// package (stderr unless the application redirected it), never stdout.
+		log.Printf("[BELLA] warning: a device key is supplied via %s but DisableE2EE is set, "+
+			"so the key is NOT presented and secrets responses are not end-to-end encrypted. "+
+			"Under ZKE enforcement every secrets read will be refused (403). "+
+			"Remove DisableE2EE to use the key, or stop supplying it.", keySource)
+	}
 
-return &Client{kiota: generated.NewBellaClient(adapter), baseURL: strings.TrimRight(opts.BaxterURL, "/"), httpClient: httpClient}, nil
+	// Build transport chain: (debug) → HMAC → (E2EE) → default
+	var transport http.RoundTripper = http.DefaultTransport
+	if e2eeOn {
+		e2ee, err := newE2EERoundTripper(transport, persistentKey, opts.OnWrappedDEK)
+		if err != nil {
+			return nil, fmt.Errorf("bellabaxter: E2EE init: %w", err)
+		}
+		transport = e2ee
+	}
+	transport = &hmacRoundTripper{
+		base:          transport,
+		keyID:         parseKeyID(opts.ApiKey),
+		signingSecret: parseSigningSecret(opts.ApiKey),
+		appClient:     firstNonEmpty(opts.AppClient, os.Getenv("BELLA_BAXTER_APP_CLIENT")),
+	}
+	if opts.Debug || os.Getenv("BELLA_DEBUG") == "1" || os.Getenv("BELLA_DEBUG") == "true" {
+		transport = &loggingRoundTripper{base: transport}
+	}
+
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   timeout,
+	}
+
+	// Register Kiota serialization factories (idempotent — safe to call multiple times)
+	kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
+		return kiotajson.NewJsonSerializationWriterFactory()
+	})
+	kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
+		return kiotatext.NewTextSerializationWriterFactory()
+	})
+	kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
+		return kiotaform.NewFormSerializationWriterFactory()
+	})
+	kiotaabstractions.RegisterDefaultSerializer(func() kiotaser.SerializationWriterFactory {
+		return kiotamultipart.NewMultipartSerializationWriterFactory()
+	})
+	kiotaabstractions.RegisterDefaultDeserializer(func() kiotaser.ParseNodeFactory {
+		return kiotajson.NewJsonParseNodeFactory()
+	})
+	kiotaabstractions.RegisterDefaultDeserializer(func() kiotaser.ParseNodeFactory {
+		return kiotatext.NewTextParseNodeFactory()
+	})
+	kiotaabstractions.RegisterDefaultDeserializer(func() kiotaser.ParseNodeFactory {
+		return kiotaform.NewFormParseNodeFactory()
+	})
+
+	adapter, err := kiotahttp.NewNetHttpRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
+		&kiotaauth.AnonymousAuthenticationProvider{}, // HMAC transport does auth
+		nil, // default parse node factory
+		nil, // default serialization writer factory
+		httpClient,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("bellabaxter: create adapter: %w", err)
+	}
+	adapter.SetBaseUrl(strings.TrimRight(opts.BaxterURL, "/"))
+
+	return &Client{kiota: generated.NewBellaClient(adapter), baseURL: strings.TrimRight(opts.BaxterURL, "/"), httpClient: httpClient}, nil
 }
 
 // privateKeyEnvVar is where `bella sdk run` injects the device key.
@@ -256,6 +260,23 @@ func e2eeEnabled(opts Options, haveDeviceKey bool) (bool, error) {
 // Close releases any resources held by the client.
 func (c *Client) Close() {}
 
+// Generated returns the underlying Kiota-generated client, for endpoints this package has no
+// method for (provider secret lists, single secrets and their versions, exports, global secrets,
+// TOTP, projects, …).
+//
+// Every request it sends goes through the same transport chain as the methods above: HMAC
+// signing, and — when E2EE is on — X-E2E-Public-Key on every /secrets path, so each of the
+// envelope-required reads (apps/sdk/SDK_CONTRACT.md) is end-to-end encrypted, decrypted
+// transparently, and refused with *E2EEResponseError if the answer is not an envelope (#1050, #1162).
+//
+// Five of those reads are declared in the OpenAPI document as returning E2EEncryptedPayload, which
+// is not the decrypted shape; read them as raw bytes, e.g.
+//
+//	ri, _ := c.Generated().Api().V1().Projects().ById(p).Environments().ByEnvSlug(e).
+//		Providers().ByProviderSlug(v).Secrets().ToGetRequestInformation(ctx, nil)
+//	body, err := c.Generated().RequestAdapter.SendPrimitive(ctx, ri, "[]byte", nil)
+func (c *Client) Generated() *generated.BellaClient { return c.kiota }
+
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 // GetAllSecrets fetches all secrets for an environment aggregated across all assigned providers.
@@ -267,34 +288,34 @@ func (c *Client) GetAllSecrets(ctx context.Context, projectRef, envSlug string) 
 	resp, err := c.kiota.Api().V1().Projects().ById(projectRef).
 		Environments().ByEnvSlug(envSlug).
 		Secrets().Get(ctx, nil)
-if err != nil {
-return nil, fmt.Errorf("bellabaxter: GetAllSecrets: %w", err)
-}
+	if err != nil {
+		return nil, fmt.Errorf("bellabaxter: GetAllSecrets: %w", err)
+	}
 
-secrets := make(map[string]string)
-if resp.GetSecrets() != nil {
-for k, v := range resp.GetSecrets().GetAdditionalData() {
-// Go Kiota stores JSON string values as *string in AdditionalData (not bare string).
-switch typedV := v.(type) {
-case string:
-secrets[k] = typedV
-case *string:
-if typedV != nil {
-secrets[k] = *typedV
-}
-}
-}
-}
+	secrets := make(map[string]string)
+	if resp.GetSecrets() != nil {
+		for k, v := range resp.GetSecrets().GetAdditionalData() {
+			// Go Kiota stores JSON string values as *string in AdditionalData (not bare string).
+			switch typedV := v.(type) {
+			case string:
+				secrets[k] = typedV
+			case *string:
+				if typedV != nil {
+					secrets[k] = *typedV
+				}
+			}
+		}
+	}
 
-version := int64(0)
-if resp.GetVersion() != nil {
-version = *resp.GetVersion()
-}
+	version := int64(0)
+	if resp.GetVersion() != nil {
+		version = *resp.GetVersion()
+	}
 
-return &AllEnvironmentSecretsResponse{
-Secrets: secrets,
-Version: version,
-}, nil
+	return &AllEnvironmentSecretsResponse{
+		Secrets: secrets,
+		Version: version,
+	}, nil
 }
 
 // GetKeyContext calls GET /api/v1/keys/me and returns the project + environment
@@ -314,37 +335,37 @@ func (c *Client) GetSecretsVersion(ctx context.Context, projectRef, envSlug stri
 	resp, err := c.kiota.Api().V1().Projects().ById(projectRef).
 		Environments().ByEnvSlug(envSlug).
 		Secrets().Version().Get(ctx, nil)
-if err != nil {
-return nil, fmt.Errorf("bellabaxter: GetSecretsVersion: %w", err)
-}
+	if err != nil {
+		return nil, fmt.Errorf("bellabaxter: GetSecretsVersion: %w", err)
+	}
 
-version := int64(0)
-if resp.GetVersion() != nil {
-version = *resp.GetVersion()
-}
+	version := int64(0)
+	if resp.GetVersion() != nil {
+		version = *resp.GetVersion()
+	}
 
-return &EnvironmentSecretsVersionResponse{Version: version}, nil
+	return &EnvironmentSecretsVersionResponse{Version: version}, nil
 }
 
 // ── Key parsing helpers ────────────────────────────────────────────────────────
 
 // parseKeyID extracts the 32-hex keyId from "bax-{keyId}-{secret}".
 func parseKeyID(apiKey string) string {
-parts := strings.SplitN(apiKey, "-", 3)
-if len(parts) == 3 {
-return parts[1]
-}
-return ""
+	parts := strings.SplitN(apiKey, "-", 3)
+	if len(parts) == 3 {
+		return parts[1]
+	}
+	return ""
 }
 
 // parseSigningSecret extracts the raw signing secret bytes from "bax-{keyId}-{secret}".
 func parseSigningSecret(apiKey string) []byte {
-parts := strings.SplitN(apiKey, "-", 3)
-if len(parts) == 3 {
-b, _ := hex.DecodeString(parts[2])
-return b
-}
-return nil
+	parts := strings.SplitN(apiKey, "-", 3)
+	if len(parts) == 3 {
+		b, _ := hex.DecodeString(parts[2])
+		return b
+	}
+	return nil
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────────────
@@ -390,38 +411,38 @@ func (c *Client) sign(method, path string, body []byte) map[string]string {
 
 // doGet performs a raw GET for write.go operations that haven't been migrated to Kiota yet.
 func (c *Client) doGet(ctx context.Context, path string, out any) error {
-req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-if err != nil {
-return fmt.Errorf("bellabaxter: build request: %w", err)
-}
-req.Header.Set("Accept", "application/json")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("bellabaxter: build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
 
-resp, err := c.httpClient.Do(req)
-if err != nil {
-return fmt.Errorf("bellabaxter: %s: %w", path, err)
-}
-defer resp.Body.Close()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("bellabaxter: %s: %w", path, err)
+	}
+	defer resp.Body.Close()
 
-switch resp.StatusCode {
-case http.StatusOK:
-case http.StatusUnauthorized:
-return &AuthError{Message: "unauthorized"}
-case http.StatusNotFound:
-return &NotFoundError{Path: path}
-default:
-b, _ := io.ReadAll(resp.Body)
-return fmt.Errorf("bellabaxter: %s returned HTTP %d: %s", path, resp.StatusCode, b)
-}
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized:
+		return &AuthError{Message: "unauthorized"}
+	case http.StatusNotFound:
+		return &NotFoundError{Path: path}
+	default:
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("bellabaxter: %s returned HTTP %d: %s", path, resp.StatusCode, b)
+	}
 
-return json.NewDecoder(resp.Body).Decode(out)
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 // firstNonEmpty returns the first non-empty string from the provided values.
 func firstNonEmpty(vals ...string) string {
-for _, v := range vals {
-if v != "" {
-return v
-}
-}
-return ""
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

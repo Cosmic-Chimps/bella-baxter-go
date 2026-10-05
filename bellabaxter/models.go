@@ -2,15 +2,15 @@ package bellabaxter
 
 // AllEnvironmentSecretsResponse is returned by GetAllSecrets.
 type AllEnvironmentSecretsResponse struct {
-	EnvironmentSlug string            `json:"environmentSlug"`
-	EnvironmentName string            `json:"environmentName"`
+	EnvironmentSlug string `json:"environmentSlug"`
+	EnvironmentName string `json:"environmentName"`
 	// Secrets contains all secrets for the environment aggregated from all providers.
 	// Served from Baxter's Redis cache — does NOT hit AWS/Azure/GCP per call.
-	Secrets         map[string]string `json:"secrets"`
+	Secrets map[string]string `json:"secrets"`
 	// Version is a monotonically increasing counter (unix seconds of last mutation).
-	Version         int64             `json:"version"`
+	Version int64 `json:"version"`
 	// LastModified is an ISO-8601 timestamp of the last mutation.
-	LastModified    string            `json:"lastModified"`
+	LastModified string `json:"lastModified"`
 }
 
 // EnvironmentSecretsVersionResponse is returned by GetSecretsVersion.
@@ -37,8 +37,8 @@ type KeyContextResponse struct {
 
 // SshCaPublicKeyResponse is returned by GetSshCaPublicKey.
 type SshCaPublicKeyResponse struct {
-	CaPublicKey    string `json:"caPublicKey"`
-	Instructions   string `json:"instructions"`
+	CaPublicKey      string `json:"caPublicKey"`
+	Instructions     string `json:"instructions"`
 	TerraformSnippet string `json:"terraformSnippet"`
 	AnsibleSnippet   string `json:"ansibleSnippet"`
 }
