@@ -2,7 +2,7 @@
   "descriptionHash": "89BEDD13FEBA2CC5622F776D6C8E9CB720304F0685000F8561FB7D88205ED66143ED4EBAF62E4DB6E7FE4F362FACF1D4393D67DA4B5DF3CD5DEFFAE141A72F67",
   "descriptionLocation": "../openapi.json",
   "lockFileVersion": "1.0.0",
-  "kiotaVersion": "1.35.0",
+  "kiotaVersion": "1.30.0",
   "clientClassName": "BellaClient",
   "typeAccessModifier": "Public",
   "clientNamespaceName": "github.com/cosmic-chimps/bella-baxter-go/generated",
@@ -30,6 +30,5 @@
   ],
   "includePatterns": [],
   "excludePatterns": [],
-  "disabledValidationRules": [],
-  "allowedExternalOrigins": []
+  "disabledValidationRules": []
 }
