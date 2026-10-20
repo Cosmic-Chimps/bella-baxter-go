@@ -269,8 +269,9 @@ func (c *Client) Close() {}
 // envelope-required reads (apps/sdk/SDK_CONTRACT.md) is end-to-end encrypted, decrypted
 // transparently, and refused with *E2EEResponseError if the answer is not an envelope (#1050, #1162).
 //
-// Five of those reads are declared in the OpenAPI document as returning E2EEncryptedPayload, which
-// is not the decrypted shape; read them as raw bytes, e.g.
+// Each of those reads declares in the OpenAPI document the PLAINTEXT it returns (#1187), so the typed
+// Get() of a generated builder parses what this transport hands it. Reading the raw body stays
+// available for callers that want the bytes, e.g.
 //
 //	ri, _ := c.Generated().Api().V1().Projects().ById(p).Environments().ByEnvSlug(e).
 //		Providers().ByProviderSlug(v).Secrets().ToGetRequestInformation(ctx, nil)
