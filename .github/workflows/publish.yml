@@ -34,7 +34,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Install Kiota
-        run: dotnet tool install --global Microsoft.OpenApi.Kiota --version 1.30.0
+        run: dotnet tool install --global Microsoft.OpenApi.Kiota --version 1.35.0
 
       - name: Generate Go client from OpenAPI spec
         run: kiota update -o generated
