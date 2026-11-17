@@ -137,4 +137,4 @@ resource "bella_secret" "db_password" {
 
 ## License
 
-Apache 2.0 — see [LICENSE](https://github.com/cosmic-chimps/bella-baxter-go/blob/main/LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.
