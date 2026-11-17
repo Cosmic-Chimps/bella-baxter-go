@@ -40,9 +40,9 @@ provider "bella" {
 | `BELLA_BAXTER_APP_CLIENT`  | Application name sent as `X-App-Client` for audit (`app_name`)     |
 | `BELLA_BAXTER_PRIVATE_KEY` | Device private key, PKCS#8 PEM (`private_key`, sensitive)          |
 
-> **Device key (ZKE).** When `private_key` or `BELLA_BAXTER_PRIVATE_KEY` is set, the provider presents
+> **Device key.** When `private_key` or `BELLA_BAXTER_PRIVATE_KEY` is set, the provider presents
 > that key on every secrets read and decrypts the response with it, so the audit log names the runner.
-> If the tenant enforces ZKE, secrets reads are refused unless this is the public key recorded on the
+> If the organisation requires registered devices, secrets reads are refused unless this is the public key recorded on the
 > API key the provider uses. A value that is set but cannot be read fails provider configuration.
 
 > **Note:** The API key already encodes which project and environment it is scoped to.

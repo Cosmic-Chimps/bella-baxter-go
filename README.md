@@ -73,11 +73,11 @@ func main() {
 | `EnableE2EE` | `false` | End-to-end encryption **without** a device key (an ephemeral key per client). Not needed when a device key is supplied |
 | `DisableE2EE` | `false` | Explicit opt-out: never present a key, even a supplied one (logs one warning if a key is supplied) |
 
-## Device key (ZKE)
+## Device key
 
 When a device key is supplied — `PrivateKeyPEM`, or the `BELLA_BAXTER_PRIVATE_KEY` variable that
 `bella sdk run` injects — the client presents it as `X-E2E-Public-Key` on every secrets request and
-decrypts the response with it. You do not need `EnableE2EE` for that. Under ZKE enforcement this is
+decrypts the response with it. You do not need `EnableE2EE` for that. When an organisation requires registered devices, this is
 what lets the app read at all: a request that presents no registered key is refused with a 403.
 
 ```go
