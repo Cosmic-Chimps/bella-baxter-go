@@ -56,7 +56,7 @@ Use the [`bella-baxter-setup-action`](https://github.com/Cosmic-Chimps/bella-bax
 
 ```yaml
 # Pin a release tag (or its commit SHA), never @main: the ref you pin is the code that installs the CLI.
-- uses: Cosmic-Chimps/bella-baxter-setup-action@v0.1.1-preview.113
+- uses: Cosmic-Chimps/bella-baxter-setup-action@v0
 
 - name: Authenticate with Bella
   run: bella auth oidc
