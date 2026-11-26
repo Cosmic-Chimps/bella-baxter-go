@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -346,9 +347,16 @@ func isOK(r *http.Response) bool {
 // loggingRoundTripper logs every HTTP request and response to stderr.
 // Enable by setting the BELLA_DEBUG=1 environment variable.
 //
-// Sensitive headers (Authorization, X-Bella-Key-Id, X-Bella-Signature, Cookie,
-// Set-Cookie) are masked, and BODIES ARE NOT LOGGED except for a truncated
-// response body on a non-2xx status.
+// Key-bearing headers are masked, request and response alike: the ones on
+// maskedHeaders, and any header whose NAME contains one of sensitiveNameParts
+// (key, token, secret, dek, signature, cookie, authorization, wrapped, proof,
+// password, credential), so a key header added tomorrow is hidden by default.
+// X-E2E-Public-Key, the PUBLIC key the client sends, is the one exception. The
+// rule and the list are the .NET CLI's (DebugLoggingHandler), which a CLI test
+// holds this list to. URLs are masked too (maskURLString): the value of every
+// query parameter whose NAME is sensitive, userinfo and all, wherever the log
+// prints one. BODIES ARE NOT LOGGED except for a truncated response
+// body on a non-2xx status, with its key-bearing fields masked (redactBody).
 //
 // The body rule is not caution, it is the whole point. This transport is the
 // OUTERMOST of the chain (debug -> HMAC -> optional E2EE -> default), so it sees
@@ -373,43 +381,206 @@ type loggingRoundTripper struct {
 const maxLoggedBody = 500
 
 // Keys are in net/http canonical form, which is what Header maps are keyed by.
+// Keep every entry a plain `"Name": true,` line: the CLI's parity test reads this literal.
 var maskedHeaders = map[string]bool{
-	"Authorization":     true,
-	"X-Bella-Key-Id":    true,
-	"X-Bella-Signature": true,
-	"Cookie":            true,
-	"Set-Cookie":        true,
+	"Authorization":              true,
+	"X-Bella-Key-Id":             true,
+	"X-Bella-Signature":          true,
+	"Cookie":                     true,
+	"Set-Cookie":                 true,
+	"X-Bella-Wrapped-Dek":        true,
+	"X-Bella-Wrapped-Shared-Dek": true,
+	"X-Bella-Lease-Id":           true,
+	"X-Bella-Call-Proof":         true,
+	"X-Bella-Api-Key":            true,
+	"X-Vault-Token":              true,
+	"X-Api-Key":                  true,
+	"X-Identity-Header":          true,
+	"Proxy-Authorization":        true,
 }
 
-func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// ── Request ──────────────────────────────────────────────────────────────
-	log.Printf("[BELLA] --> %s %s", req.Method, req.URL.String())
-	for k, vs := range req.Header {
-		if maskedHeaders[k] {
+// sensitiveNameParts: a header (or body field) whose name contains one of these,
+// compared case-insensitively, is masked even when it is on no list.
+var sensitiveNameParts = []string{
+	"key", "token", "secret", "dek", "signature", "cookie", "authorization",
+	"wrapped", "proof", "password", "credential",
+}
+
+// neverMaskedHeaders is what the rule would catch that is not secret: the E2E
+// PUBLIC key the client sends so the server can wrap a data key to it.
+var neverMaskedHeaders = map[string]bool{
+	"X-E2e-Public-Key": true, // canonical form of X-E2E-Public-Key
+}
+
+// isSensitiveHeader reports whether the value of the header called name must never be logged.
+func isSensitiveHeader(name string) bool {
+	canonical := http.CanonicalHeaderKey(name)
+	if neverMaskedHeaders[canonical] {
+		return false
+	}
+	if maskedHeaders[canonical] {
+		return true
+	}
+	return nameIsSensitive(name)
+}
+
+func nameIsSensitive(name string) bool {
+	lower := strings.ToLower(name)
+	for _, part := range sensitiveNameParts {
+		if strings.Contains(lower, part) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSensitiveField is the body-field form of the rule: snake_case, kebab-case and
+// camelCase reduce to the same letters (wrapped_dek, wrappedDek, wrapped-dek).
+func isSensitiveField(name string) bool {
+	return nameIsSensitive(strings.NewReplacer("_", "", "-", "").Replace(name))
+}
+
+// sensitivePair finds name=value / name: value pairs with a sensitive name in a
+// body that is not JSON (a proxy's page, a form echo).
+var sensitivePair = regexp.MustCompile(
+	`(?i)([\w-]*(?:key|token|secret|dek|signature|password|wrapped|proof|credential)[\w-]*)(\s*[=:]\s*)(?:"[^"]*"|[^\s&,;"]+)`)
+
+// redactBody returns a failure body with every key-bearing field masked: a JSON
+// body keeps its shape and loses the value of each property whose name matches the
+// rule (whatever type the value is); anything else gets its name=value pairs masked.
+func redactBody(body string) string {
+	dec := json.NewDecoder(strings.NewReader(body))
+	dec.UseNumber()
+	var node interface{}
+	if err := dec.Decode(&node); err == nil && !dec.More() {
+		switch node.(type) {
+		case map[string]interface{}, []interface{}:
+			redactNode(node)
+			var out bytes.Buffer
+			enc := json.NewEncoder(&out)
+			enc.SetEscapeHTML(false)
+			if err := enc.Encode(node); err == nil {
+				return strings.TrimSuffix(out.String(), "\n")
+			}
+		}
+	}
+	return sensitivePair.ReplaceAllString(body, "${1}${2}***")
+}
+
+func redactNode(node interface{}) {
+	switch n := node.(type) {
+	case map[string]interface{}:
+		for k, v := range n {
+			if isSensitiveField(k) {
+				n[k] = "***"
+			} else {
+				redactNode(v)
+			}
+		}
+	case []interface{}:
+		for _, v := range n {
+			redactNode(v)
+		}
+	}
+}
+
+// sensitiveQueryNames are the query parameters the name rule misses. "sig" is the
+// signature of an Azure SAS URL (the rest of a SAS, se/sv/sp, is expiry, version
+// and permissions: harmless, and what a person debugging an expired link needs to
+// read), so it is the one name added. The presigned S3 names are all caught by the
+// rule itself (X-Amz-Signature, X-Amz-Credential, X-Amz-Security-Token).
+var sensitiveQueryNames = map[string]bool{"sig": true}
+
+// urlHeaders carry a URL, which can carry a credential in its query.
+var urlHeaders = map[string]bool{"Location": true, "Content-Location": true, "Referer": true}
+
+// authorityPrefix matches the start of an absolute or scheme-relative URL.
+var authorityPrefix = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9+.-]*:)?//`)
+
+// urlInText finds absolute URLs inside free text, such as an error message.
+var urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
+
+func isSensitiveQueryName(name string) bool {
+	if decoded, err := url.QueryUnescape(name); err == nil {
+		name = decoded
+	}
+	return nameIsSensitive(name) || sensitiveQueryNames[strings.ToLower(name)]
+}
+
+// maskURLString returns s with the value of every sensitive query parameter and
+// the userinfo replaced by ***. Scheme, host, port, path, fragment, the other
+// parameters, their order and repeated names are kept; a URL without a query or
+// userinfo comes back unchanged. It works on the text, not on a parsed URL, so a
+// string that does not parse is masked the same way.
+func maskURLString(s string) string {
+	rest, frag := s, ""
+	if i := strings.IndexByte(rest, '#'); i >= 0 {
+		rest, frag = rest[:i], rest[i:]
+	}
+	query, hasQuery := "", false
+	if i := strings.IndexByte(rest, '?'); i >= 0 {
+		rest, query, hasQuery = rest[:i], rest[i+1:], true
+	}
+	if loc := authorityPrefix.FindStringIndex(rest); loc != nil {
+		authEnd := len(rest)
+		if i := strings.IndexByte(rest[loc[1]:], '/'); i >= 0 {
+			authEnd = loc[1] + i
+		}
+		if at := strings.LastIndexByte(rest[loc[1]:authEnd], '@'); at >= 0 {
+			rest = rest[:loc[1]] + "***@" + rest[loc[1]+at+1:]
+		}
+	}
+	if !hasQuery {
+		return rest + frag
+	}
+	pairs := strings.Split(query, "&")
+	for i, pair := range pairs {
+		name, _, hasValue := strings.Cut(pair, "=")
+		if hasValue && isSensitiveQueryName(name) {
+			pairs[i] = name + "=***"
+		}
+	}
+	return rest + "?" + strings.Join(pairs, "&") + frag
+}
+
+// maskURLsInText masks every absolute URL found in free text.
+func maskURLsInText(s string) string {
+	return urlInText.ReplaceAllStringFunc(s, maskURLString)
+}
+
+func logHeaders(h http.Header) {
+	for k, vs := range h {
+		if isSensitiveHeader(k) {
 			log.Printf("[BELLA]     %s: ***", k)
+		} else if urlHeaders[http.CanonicalHeaderKey(k)] {
+			masked := make([]string, len(vs))
+			for i, v := range vs {
+				masked[i] = maskURLString(v)
+			}
+			log.Printf("[BELLA]     %s: %s", k, strings.Join(masked, ", "))
 		} else {
 			log.Printf("[BELLA]     %s: %s", k, strings.Join(vs, ", "))
 		}
 	}
+}
+
+func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// ── Request ──────────────────────────────────────────────────────────────
+	log.Printf("[BELLA] --> %s %s", req.Method, maskURLString(req.URL.String()))
+	logHeaders(req.Header)
 
 	// The request body is never logged: on a write it IS the secret value.
 
 	// ── Perform ──────────────────────────────────────────────────────────────
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
-		log.Printf("[BELLA] <-- ERROR: %v", err)
+		log.Printf("[BELLA] <-- ERROR: %s", maskURLsInText(err.Error()))
 		return nil, err
 	}
 
 	// ── Response ─────────────────────────────────────────────────────────────
 	log.Printf("[BELLA] <-- %s", resp.Status)
-	for k, vs := range resp.Header {
-		if maskedHeaders[k] {
-			log.Printf("[BELLA]     %s: ***", k)
-		} else {
-			log.Printf("[BELLA]     %s: %s", k, strings.Join(vs, ", "))
-		}
-	}
+	logHeaders(resp.Header)
 
 	// A successful body is a secret on the read path, so it is never logged. The
 	// body is still read and replaced either way: draining it here and handing back
@@ -421,7 +592,7 @@ func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, fmt.Errorf("bellabaxter debug: read response body: %w", err)
 	}
 	if !isOK(resp) && len(respBody) > 0 {
-		log.Printf("[BELLA]     body: %s", truncate(string(respBody), maxLoggedBody))
+		log.Printf("[BELLA]     body: %s", truncate(redactBody(string(respBody)), maxLoggedBody))
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	resp.ContentLength = int64(len(respBody))
@@ -430,12 +601,17 @@ func (t *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 
 // truncate shortens s to at most n bytes, saying so when it did.
 //
-// Byte-wise on purpose: a body can be any encoding, and a rune-safe slice buys
-// tidier output at the cost of a rule that is harder to state. It marks the cut so
-// a reader never mistakes a truncated document for a malformed one.
+// The cut is made on a character boundary: it steps back to the start of the rune
+// it would have split, so a multi-byte character straddling the limit is dropped
+// whole instead of leaving an invalid UTF-8 tail in the log. It marks the cut so a
+// reader never mistakes a truncated document for a malformed one.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + fmt.Sprintf("… (%d bytes total, truncated)", len(s))
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + fmt.Sprintf("… (%d bytes total, truncated)", len(s))
 }
